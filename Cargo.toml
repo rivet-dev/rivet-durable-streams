@@ -1,6 +1,6 @@
 [package]
 name = "rivet-durable-streams"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Rivet Gaming, LLC <developer@rivet.dev>"]
@@ -33,8 +33,8 @@ futures-util = "0.3"
 http = "1.3"
 percent-encoding = "2.3"
 reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls-native-roots", "rustls-tls-webpki-roots", "stream"] }
-rivetkit = { git = "https://github.com/rivet-dev/rivet", rev = "89c31e9438cdd0f2aa387dd6224b9145697a03f8" }
-rivetkit-client = { git = "https://github.com/rivet-dev/rivet", rev = "89c31e9438cdd0f2aa387dd6224b9145697a03f8" }
+rivetkit = "=2.3.12"
+rivetkit-client = "=2.3.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.128", features = ["raw_value"] }
 sha2 = "0.10"
