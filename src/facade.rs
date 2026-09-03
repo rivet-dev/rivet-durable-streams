@@ -1,12 +1,13 @@
 use std::time::Duration;
 
 use axum::Router;
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::Response;
 use axum::routing::any;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use bytes::{Bytes, BytesMut};
 use futures_util::StreamExt;
 use rivetkit_client::{Client, GetOptions, GetOrCreateOptions};
 use serde_json::json;
@@ -106,16 +107,19 @@ async fn handle(
 
     let body = match tokio::time::timeout(
         state.config.body_timeout,
-        to_bytes(body, MAX_BODY_BYTES + 1),
+        collect_bounded_body(body, MAX_BODY_BYTES),
     )
     .await
     {
-        Ok(Ok(body)) if body.len() <= MAX_BODY_BYTES => body,
-        Ok(Ok(_)) | Ok(Err(_)) => {
+        Ok(Ok(Some(body))) => body,
+        Ok(Ok(None)) => {
             return cors_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 Body::from("Payload too large"),
             );
+        }
+        Ok(Err(_)) => {
+            return cors_response(StatusCode::BAD_REQUEST, Body::from("Invalid request body"));
         }
         Err(_) => {
             return cors_response(
@@ -264,6 +268,25 @@ async fn handle(
     response
 }
 
+async fn collect_bounded_body(body: Body, limit: usize) -> Result<Option<Bytes>, axum::Error> {
+    let mut stream = body.into_data_stream();
+    let mut collected = BytesMut::new();
+    let mut too_large = false;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if !too_large {
+            if collected.len().saturating_add(chunk.len()) <= limit {
+                collected.extend_from_slice(&chunk);
+            } else {
+                too_large = true;
+            }
+        }
+    }
+
+    Ok((!too_large).then(|| collected.freeze()))
+}
+
 fn bridge_request_headers(headers: &HeaderMap) -> Result<HeaderMap, String> {
     let mut bridged = HeaderMap::new();
     for name in BRIDGED_REQUEST_HEADERS {
@@ -338,7 +361,30 @@ fn apply_cors(headers: &mut HeaderMap) {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use futures_util::stream;
+
     use super::*;
+
+    #[tokio::test]
+    async fn oversized_body_is_fully_drained() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&seen);
+        let chunks = ["abcd", "efgh", "ijkl"].into_iter().map(move |chunk| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            Ok::<_, Infallible>(Bytes::from_static(chunk.as_bytes()))
+        });
+
+        let result = collect_bounded_body(Body::from_stream(stream::iter(chunks)), 5)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(seen.load(Ordering::Relaxed), 3);
+    }
 
     #[test]
     fn keys_are_tenant_and_path_scoped() {
