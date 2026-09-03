@@ -11,7 +11,6 @@
 
 <p align="center">
   <a href="https://rivet.dev/actors/integrations/durable-streams">Guide</a> ·
-  <a href="https://github.com/rivet-dev/rivet/tree/main/examples/experimental-durable-streams-ai-agent">Example</a> ·
   <a href="https://rivet.dev/blog/2026-09-03-durable-streams-now-supports-rivet-actors">Announcement</a> ·
   <a href="https://rivet.dev/discord">Discord</a>
 </p>
@@ -103,7 +102,6 @@ Durable Streams runs as a single service on [Rivet Cloud](https://dashboard.rive
 ## Resources
 
 - [Integration guide](https://rivet.dev/actors/integrations/durable-streams): run locally, deploy to Rivet Cloud, or self-host.
-- [AI agent example](https://github.com/rivet-dev/rivet/tree/main/examples/experimental-durable-streams-ai-agent): a Rivet Actor that reads prompts from one stream and streams responses into another.
 - [Announcement post](https://rivet.dev/blog/2026-09-03-durable-streams-now-supports-rivet-actors): why Durable Streams on Rivet, and how it works.
 - [Durable Streams protocol](https://durablestreams.com): the full protocol, JSON mode, StreamDB, and the Yjs, TanStack AI, and Vercel AI SDK integrations.
 - [Discord](https://rivet.dev/discord): questions and support.
