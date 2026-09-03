@@ -137,7 +137,7 @@ fn normalize_serve_config(mut serve_config: ServeConfig) -> anyhow::Result<Serve
         .set_password(None)
         .map_err(|_| anyhow::anyhow!("clear RIVET_ENDPOINT password"))?;
 
-    serve_config.endpoint = endpoint.to_string();
+    serve_config.endpoint = endpoint.to_string().trim_end_matches('/').to_owned();
     Ok(serve_config)
 }
 
@@ -161,7 +161,7 @@ mod tests {
         .unwrap();
 
         let config = client_config(&serve_config).unwrap();
-        assert_eq!(config.endpoint, "https://api.rivet.dev/");
+        assert_eq!(config.endpoint, "https://api.rivet.dev");
         assert_eq!(config.namespace.as_deref(), Some("cloud-ns"));
         assert_eq!(config.token.as_deref(), Some("sk_cloud-token"));
         assert_eq!(config.pool_name.as_deref(), Some("durable-streams"));
