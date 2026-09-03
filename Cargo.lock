@@ -1487,7 +1487,7 @@ checksum = "3e1c79c3c3e220bc9bd02753be9920336ae927c818b7c3d3c28c367ac6236d9e"
 
 [[package]]
 name = "rivet-durable-streams"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",

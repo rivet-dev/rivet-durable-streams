@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly RIVET_REVISION=89c31e9438cdd0f2aa387dd6224b9145697a03f8
+readonly RIVET_VERSION=2.3.12
 readonly ENGINE_PORT=17420
 readonly SERVER_PORT=17878
 readonly RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rivet-durable-streams-conformance.XXXXXX")"
@@ -53,28 +53,31 @@ wait_ready() {
 	return 1
 }
 
-if [[ -n "${RIVET_ROOT:-}" ]]; then
-	rivet_root="$RIVET_ROOT"
-else
-	rivet_root="$PWD/target/conformance/rivet-${RIVET_REVISION:0:12}"
-	if ! git -C "$rivet_root" cat-file -e "$RIVET_REVISION^{commit}" 2>/dev/null; then
-		mkdir -p "$rivet_root"
-		if ! git -C "$rivet_root" rev-parse --git-dir >/dev/null 2>&1; then
-			git -C "$rivet_root" init --quiet
-		fi
-		if ! git -C "$rivet_root" remote get-url origin >/dev/null 2>&1; then
-			git -C "$rivet_root" remote add origin https://github.com/rivet-dev/rivet.git
-		fi
-		git -C "$rivet_root" fetch --quiet --depth 1 origin "$RIVET_REVISION"
-	fi
-	git -C "$rivet_root" switch --quiet --detach "$RIVET_REVISION"
-fi
-readonly RIVET_ROOT="$rivet_root"
-[[ "$(git -C "$RIVET_ROOT" rev-parse HEAD)" == "$RIVET_REVISION" ]]
+case "$(uname -s)-$(uname -m)" in
+	Linux-x86_64) engine_artifact=rivet-engine-x86_64-unknown-linux-musl ;;
+	Linux-aarch64 | Linux-arm64) engine_artifact=rivet-engine-aarch64-unknown-linux-musl ;;
+	*) echo "error: unsupported platform $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
 
-echo "Building Rivet Engine at $RIVET_REVISION"
-(cd "$RIVET_ROOT" && LIBCLANG_PATH="${LIBCLANG_PATH:-/usr/lib/llvm-14/lib}" \
-	cargo build --quiet --locked --profile quick -p rivet-engine)
+engine_cache="$PWD/target/conformance/engine-$RIVET_VERSION"
+engine_binary="$engine_cache/$engine_artifact"
+release_base="https://releases.rivet.dev/rivet/$RIVET_VERSION/engine"
+manifest="$(curl --fail --silent --show-error "$release_base/SHA256SUMS")"
+expected_checksum="$(awk -v artifact="$engine_artifact" '$2 == artifact { print $1 }' <<<"$manifest")"
+[[ -n "$expected_checksum" ]] || { echo "error: missing Engine checksum" >&2; exit 1; }
+
+if [[ ! -x "$engine_binary" ]] \
+	|| [[ "$(sha256sum "$engine_binary" | awk '{ print $1 }')" != "$expected_checksum" ]]; then
+	downloaded_engine="$RUN_DIR/$engine_artifact"
+	curl --fail --silent --show-error "$release_base/$engine_artifact" -o "$downloaded_engine"
+	received_checksum="$(sha256sum "$downloaded_engine" | awk '{ print $1 }')"
+	[[ "$received_checksum" == "$expected_checksum" ]] \
+		|| { echo "error: Engine checksum mismatch" >&2; exit 1; }
+	mkdir -p "$engine_cache"
+	install -m 755 "$downloaded_engine" "$engine_binary"
+fi
+
+echo "Using Rivet Engine $RIVET_VERSION"
 cargo build --quiet --locked --bin rivet-durable-streams
 
 RIVET__GUARD__HOST=127.0.0.1 \
@@ -84,7 +87,7 @@ RIVET__API_PEER__PORT="$((ENGINE_PORT + 1))" \
 RIVET__METRICS__HOST=127.0.0.1 \
 RIVET__METRICS__PORT="$((ENGINE_PORT + 10))" \
 RIVET__FILE_SYSTEM__PATH="$RUN_DIR/engine" \
-	setsid "$RIVET_ROOT/target/quick/rivet-engine" start >"$RUN_DIR/engine.log" 2>&1 &
+	setsid "$engine_binary" start >"$RUN_DIR/engine.log" 2>&1 &
 engine_pid="$!"
 wait_ready "Rivet Engine" "http://127.0.0.1:$ENGINE_PORT/health" "$engine_pid" "$RUN_DIR/engine.log"
 
