@@ -30,7 +30,9 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
-          if curl --fail --silent "https://crates.io/api/v1/crates/rivet-durable-streams/$VERSION" >/dev/null; then
+          if curl --fail --silent \
+            --user-agent "rivet-durable-streams-release/1.0 (developer@rivet.dev)" \
+            "https://crates.io/api/v1/crates/rivet-durable-streams/$VERSION" >/dev/null; then
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
