@@ -1,0 +1,46 @@
+[package]
+name = "rivet-durable-streams"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Rivet Gaming, LLC <developer@rivet.dev>"]
+license = "Apache-2.0"
+description = "Durable Streams protocol server for Rivet Actors"
+homepage = "https://rivet.dev"
+repository = "https://github.com/rivet-dev/rivet-durable-streams"
+readme = "README.md"
+publish = ["crates-io"]
+include = [
+    "src/**/*.rs",
+    "tests/**/*.rs",
+    "inspector/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+]
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["http2", "macros"] }
+base64 = "0.22"
+bytes = "1.6"
+chrono = { version = "0.4.38", features = ["now"] }
+clap = { version = "4.3", features = ["derive"] }
+futures-util = "0.3"
+http = "1.3"
+reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls-native-roots", "rustls-tls-webpki-roots", "stream"] }
+rivetkit = { git = "https://github.com/rivet-dev/actors.git", rev = "9ecb308e908dbe6b06144b6cd92dc82a6a02542c" }
+rivetkit-client = { git = "https://github.com/rivet-dev/actors.git", rev = "9ecb308e908dbe6b06144b6cd92dc82a6a02542c" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.128", features = ["raw_value"] }
+sha2 = "0.10"
+tokio = { version = "1.44", features = ["full", "tracing"] }
+tokio-util = "0.7"
+url = { version = "2.5", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }

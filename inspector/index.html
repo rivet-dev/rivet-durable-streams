@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Durable Stream</title>
+		<link rel="stylesheet" href="../../tab.css" />
+		<style>
+			html, body { height: 100%; overflow: hidden; }
+			body { background: var(--rivet-card); }
+			button { padding: 0; }
+			.app { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+			.topbar { display: flex; min-height: 48px; align-items: center; gap: var(--rivet-space-3); border-bottom: 1px solid var(--rivet-border); padding: 0 var(--rivet-space-4); }
+			.identity { min-width: 0; display: flex; align-items: center; gap: var(--rivet-space-2); }
+			.identity strong { flex: none; font-size: 13px; font-weight: 600; }
+			.actor-id { min-width: 0; overflow: hidden; color: var(--rivet-muted-foreground); font-family: var(--rivet-font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+			.status-dot { width: 7px; height: 7px; flex: none; border-radius: 999px; background: var(--rivet-muted-foreground); opacity: .5; }
+			.status-dot[data-state="open"] { background: #22c55e; opacity: 1; }
+			.status-dot[data-state="closed"] { background: var(--rivet-muted-foreground); opacity: .7; }
+			.status-dot[data-state="deleted"] { background: var(--rivet-destructive); opacity: 1; }
+			.spacer { flex: 1; }
+			.updated { color: var(--rivet-muted-foreground); font-size: 11px; }
+			.icon-button { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center; border-radius: var(--rivet-radius-sm); background: transparent; color: var(--rivet-muted-foreground); }
+			.icon-button:hover:not(:disabled) { background: var(--rivet-muted); color: var(--rivet-foreground); }
+			.icon-button svg { width: 14px; height: 14px; }
+			.icon-button.loading svg { animation: spin .8s linear infinite; }
+			.tabs { display: flex; flex: none; gap: var(--rivet-space-1); border-bottom: 1px solid var(--rivet-border); padding: 0 var(--rivet-space-4); }
+			.tab { position: relative; border: 0; border-radius: 0; background: transparent; color: var(--rivet-muted-foreground); padding: 9px 10px 8px; font-size: 12px; font-weight: 500; }
+			.tab:hover:not(:disabled) { background: transparent; color: var(--rivet-foreground); }
+			.tab[aria-selected="true"] { color: var(--rivet-foreground); }
+			.tab[aria-selected="true"]::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px 2px 0 0; background: var(--rivet-primary); content: ""; }
+			.tab-count { margin-left: 5px; color: var(--rivet-muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+			.viewport { min-height: 0; flex: 1; overflow: auto; }
+			.content { width: 100%; max-width: 920px; margin: 0 auto; padding: var(--rivet-space-4); }
+			.error { margin-bottom: var(--rivet-space-4); }
+			.panel[hidden] { display: none; }
+			.stack { display: flex; flex-direction: column; gap: var(--rivet-space-4); }
+			.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--rivet-space-3); }
+			.stat, .card { border: 1px solid var(--rivet-border); border-radius: calc(var(--rivet-radius-lg) + 4px); background: var(--rivet-secondary); }
+			.stat { min-width: 0; padding: var(--rivet-space-4); }
+			.stat-label { color: var(--rivet-muted-foreground); font-size: 11px; }
+			.stat-value { margin-top: 3px; overflow: hidden; font-family: var(--rivet-font-mono); font-size: 17px; font-weight: 500; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+			.card { overflow: hidden; padding: var(--rivet-space-4); }
+			.card-header { display: flex; align-items: baseline; gap: var(--rivet-space-2); margin-bottom: var(--rivet-space-3); }
+			.card-title { font-size: 13px; font-weight: 600; }
+			.card-note { margin-left: auto; color: var(--rivet-muted-foreground); font-size: 11px; }
+			.details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--rivet-space-4) var(--rivet-space-8); border: 1px solid var(--rivet-border); border-radius: var(--rivet-radius-lg); padding: var(--rivet-space-4); }
+			.field { min-width: 0; }
+			.field-label { color: var(--rivet-muted-foreground); font-size: 10px; }
+			.field-value { margin-top: 2px; overflow: hidden; font-family: var(--rivet-font-mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+			.table-wrap { overflow-x: auto; border: 1px solid var(--rivet-border); border-radius: var(--rivet-radius-lg); }
+			table { width: 100%; border-collapse: collapse; font-size: 12px; }
+			th { padding: 8px 12px; color: var(--rivet-muted-foreground); font-size: 10px; font-weight: 500; text-align: left; white-space: nowrap; }
+			td { padding: 8px 12px; border-top: 1px solid hsl(var(--rivet-border-raw) / .65); vertical-align: top; white-space: nowrap; }
+			tbody tr:hover { background: hsl(var(--rivet-muted-raw) / .5); }
+			.mono { font-family: var(--rivet-font-mono); font-variant-numeric: tabular-nums; }
+			.muted { color: var(--rivet-muted-foreground); }
+			.preview { min-width: 260px; max-width: 480px; overflow: hidden; color: var(--rivet-muted-foreground); font-family: var(--rivet-font-mono); font-size: 11px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+			.empty { display: flex; min-height: 180px; align-items: center; justify-content: center; color: var(--rivet-muted-foreground); font-size: 12px; text-align: center; }
+			.loading-state { padding-top: 20vh; }
+			.limit-list { display: flex; flex-wrap: wrap; gap: var(--rivet-space-2); }
+			.limit { border-radius: var(--rivet-radius-sm); background: hsl(var(--rivet-muted-raw) / .6); padding: 4px 7px; color: var(--rivet-muted-foreground); font-family: var(--rivet-font-mono); font-size: 10px; }
+			@keyframes spin { to { transform: rotate(360deg); } }
+			@media (max-width: 700px) {
+				.updated { display: none; }
+				.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+				.details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+				.content { padding: var(--rivet-space-3); }
+			}
+		</style>
+	</head>
+	<body>
+		<div class="app">
+			<header class="topbar">
+				<div class="identity">
+					<span class="status-dot" id="status-dot" aria-hidden="true"></span>
+					<strong>Durable Stream</strong>
+					<span class="actor-id" id="actor-id"></span>
+				</div>
+				<span class="spacer"></span>
+				<span class="updated" id="updated"></span>
+				<button class="icon-button" id="refresh" type="button" title="Refresh" aria-label="Refresh">
+					<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 1.5v3h-3"/>
+					</svg>
+				</button>
+			</header>
+			<nav class="tabs" role="tablist" aria-label="Stream details">
+				<button class="tab" id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true" tabindex="0">Overview</button>
+				<button class="tab" id="tab-messages" role="tab" aria-controls="panel-messages" aria-selected="false" tabindex="-1">Messages<span class="tab-count" id="messages-count"></span></button>
+				<button class="tab" id="tab-producers" role="tab" aria-controls="panel-producers" aria-selected="false" tabindex="-1">Producers<span class="tab-count" id="producers-count"></span></button>
+				<button class="tab" id="tab-forks" role="tab" aria-controls="panel-forks" aria-selected="false" tabindex="-1">Forks<span class="tab-count" id="forks-count"></span></button>
+			</nav>
+			<div class="viewport">
+				<main class="content">
+					<div id="error" class="rivet-error error" hidden></div>
+					<section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview"><div class="empty loading-state">Connecting…</div></section>
+					<section class="panel" id="panel-messages" role="tabpanel" aria-labelledby="tab-messages" hidden></section>
+					<section class="panel" id="panel-producers" role="tabpanel" aria-labelledby="tab-producers" hidden></section>
+					<section class="panel" id="panel-forks" role="tabpanel" aria-labelledby="tab-forks" hidden></section>
+				</main>
+			</div>
+		</div>
+		<script>
+			function trustedShellOrigin() {
+				const raw = new URLSearchParams(location.search).get("shellOrigin");
+				try { return raw ? new URL(raw).origin : location.origin; } catch { return location.origin; }
+			}
+			const SHELL_ORIGIN = trustedShellOrigin();
+			let authToken = null;
+			let refreshing = false;
+
+			const SQL = {
+				overview: `SELECT gen AS generation, content_type, ttl_seconds, expires_at, closed, current_offset, last_seq, created_at, last_accessed_at, forked_from, fork_offset, soft_deleted, (SELECT COUNT(*) FROM messages) AS message_count, (SELECT COALESCE(SUM(length(data)), 0) FROM messages) AS stored_bytes, (SELECT COUNT(*) FROM producers) AS producer_count, (SELECT COUNT(*) FROM fork_edges) AS fork_count FROM meta WHERE id = 1 LIMIT 1`,
+				messages: `SELECT msg_offset, length(data) AS bytes, hex(substr(data, 1, 256)) AS preview_hex, ts FROM messages ORDER BY msg_offset DESC LIMIT 100`,
+				producers: `SELECT producer_id, epoch, last_seq, last_updated FROM producers ORDER BY last_updated DESC, producer_id LIMIT 100`,
+				forkOrigin: `SELECT forked_from, fork_offset, fork_sub_offset, fork_edge_id, fork_source_gen FROM meta WHERE id = 1 AND forked_from IS NOT NULL LIMIT 1`,
+				forkEdges: `SELECT edge_id, fork_offset FROM fork_edges ORDER BY edge_id LIMIT 100`,
+				maintenance: `SELECT 'fork intent' AS kind, edge_id, parent_path, params_key AS detail, NULL AS source_gen FROM fork_intents UNION ALL SELECT 'GC release', edge_id, parent_path, NULL, source_gen FROM gc_releases LIMIT 100`,
+			};
+
+			async function query(sql) {
+				const response = await fetch("../../database/execute", {
+					method: "POST",
+					headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
+					body: JSON.stringify({ sql }),
+				});
+				if (response.status === 401) {
+					parent.postMessage({ type: "token-refresh-needed", v: 1 }, SHELL_ORIGIN);
+					return null;
+				}
+				if (!response.ok) throw new Error(`Inspector query failed: ${response.status}`);
+				return (await response.json()).rows ?? [];
+			}
+
+			const emptyValue = (value) => value == null || value === "" ? "—" : String(value);
+			const number = (value) => new Intl.NumberFormat().format(Number(value ?? 0));
+			function bytes(value) {
+				const size = Number(value ?? 0);
+				if (size < 1024) return `${size} B`;
+				if (size < 1024 ** 2) return `${(size / 1024).toFixed(size < 10240 ? 1 : 0)} KiB`;
+				return `${(size / 1024 ** 2).toFixed(1)} MiB`;
+			}
+			function time(value) {
+				if (value == null || value === "") return "—";
+				const date = typeof value === "number" ? new Date(value) : new Date(String(value));
+				return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+			}
+			function shortTime(value) {
+				const date = new Date(Number(value));
+				if (Number.isNaN(date.valueOf())) return emptyValue(value);
+				const today = new Date();
+				return date.toDateString() === today.toDateString()
+					? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+					: date.toLocaleDateString([], { month: "short", day: "numeric" });
+			}
+			function producerId(value) {
+				try {
+					const raw = String(value).replace(/-/g, "+").replace(/_/g, "/");
+					const normalized = raw.padEnd(Math.ceil(raw.length / 4) * 4, "=");
+					const bytes = Uint8Array.from(atob(normalized), (char) => char.charCodeAt(0));
+					return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+				} catch { return emptyValue(value); }
+			}
+			function preview(hex) {
+				if (!hex) return "Empty message";
+				const values = String(hex).match(/.{1,2}/g)?.map((pair) => Number.parseInt(pair, 16)) ?? [];
+				const text = new TextDecoder("utf-8", { fatal: false }).decode(new Uint8Array(values));
+				return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "·");
+			}
+			function el(tag, className, text) {
+				const node = document.createElement(tag);
+				if (className) node.className = className;
+				if (text != null) node.textContent = text;
+				return node;
+			}
+			function field(label, value, title = value) {
+				const node = el("div", "field");
+				node.append(el("div", "field-label", label));
+				const content = el("div", "field-value", emptyValue(value));
+				content.title = title == null ? "" : String(title);
+				node.append(content);
+				return node;
+			}
+			function card(title, note, content) {
+				const node = el("section", "card");
+				const header = el("div", "card-header");
+				header.append(el("span", "card-title", title));
+				if (note) header.append(el("span", "card-note", note));
+				node.append(header, content);
+				return node;
+			}
+			function dataTable(columns, rows) {
+				if (!rows.length) return el("div", "empty", "Nothing here yet.");
+				const wrap = el("div", "table-wrap");
+				const node = el("table");
+				const head = node.createTHead().insertRow();
+				for (const column of columns) head.append(el("th", "", column.label));
+				const body = node.createTBody();
+				for (const row of rows) {
+					const tr = body.insertRow();
+					for (const column of columns) {
+						const td = tr.insertCell();
+						if (column.className) td.className = column.className;
+						const rendered = column.render ? column.render(row[column.key], row) : emptyValue(row[column.key]);
+						if (rendered instanceof Node) td.append(rendered); else td.textContent = rendered;
+					}
+				}
+				wrap.append(node);
+				return wrap;
+			}
+
+			function renderOverview(rows) {
+				const panel = document.getElementById("panel-overview");
+				if (!rows.length) {
+					panel.replaceChildren(el("div", "empty", "This stream has not been created yet."));
+					document.getElementById("status-dot").dataset.state = "closed";
+					return;
+				}
+				const meta = rows[0];
+				const status = Number(meta.soft_deleted) ? "Deleted" : Number(meta.closed) ? "Closed" : "Open";
+				document.getElementById("status-dot").dataset.state = status.toLowerCase();
+				const stats = el("div", "stats");
+				for (const [label, value] of [["Current offset", meta.current_offset], ["Messages", number(meta.message_count)], ["Stored", bytes(meta.stored_bytes)], ["Status", status]]) {
+					const stat = el("div", "stat");
+					stat.append(el("div", "stat-label", label), el("div", "stat-value", value));
+					stats.append(stat);
+				}
+				const details = el("div", "details");
+				details.append(
+					field("Content type", meta.content_type),
+					field("Generation", meta.generation),
+					field("Last sequence", meta.last_seq),
+					field("Created", time(Number(meta.created_at))),
+					field("Last accessed", time(Number(meta.last_accessed_at))),
+					field("Expires", meta.expires_at ? time(meta.expires_at) : meta.ttl_seconds == null ? "Never" : `${meta.ttl_seconds}s after access`),
+				);
+				const limits = el("div", "limit-list");
+				for (const value of ["1 MB writes", "4 MiB reads", "128 rows per read", "64 live readers"]) limits.append(el("span", "limit", value));
+				const stack = el("div", "stack");
+				stack.append(stats, card("Stream", "Read-only", details), card("Protocol limits", "Per stream", limits));
+				panel.replaceChildren(stack);
+				document.getElementById("messages-count").textContent = number(meta.message_count);
+				document.getElementById("producers-count").textContent = number(meta.producer_count);
+				document.getElementById("forks-count").textContent = number(Number(meta.fork_count) + (meta.forked_from ? 1 : 0));
+			}
+
+			function renderMessages(rows) {
+				const content = dataTable([
+					{ label: "Offset", key: "msg_offset", className: "mono" },
+					{ label: "Size", key: "bytes", className: "mono muted", render: bytes },
+					{ label: "Preview", key: "preview_hex", render: (value) => { const node = el("div", "preview", preview(value)); node.title = node.textContent; return node; } },
+					{ label: "Written", key: "ts", className: "muted", render: shortTime },
+				], rows);
+				const stack = el("div", "stack");
+				stack.append(card("Messages", rows.length ? `${rows.length} most recent` : "", content));
+				document.getElementById("panel-messages").replaceChildren(stack);
+			}
+
+			function renderProducers(rows) {
+				const content = dataTable([
+					{ label: "Producer", key: "producer_id", className: "mono", render: producerId },
+					{ label: "Epoch", key: "epoch", className: "mono" },
+					{ label: "Last sequence", key: "last_seq", className: "mono" },
+					{ label: "Last active", key: "last_updated", className: "muted", render: shortTime },
+				], rows);
+				const stack = el("div", "stack");
+				stack.append(card("Idempotent producers", rows.length ? `${rows.length} active` : "", content));
+				document.getElementById("panel-producers").replaceChildren(stack);
+			}
+
+			function renderForks(originRows, edgeRows, maintenanceRows) {
+				const stack = el("div", "stack");
+				if (originRows.length) {
+					const origin = originRows[0];
+					const details = el("div", "details");
+					details.append(field("Parent", origin.forked_from), field("Fork offset", origin.fork_offset), field("Sub-offset", origin.fork_sub_offset), field("Edge", origin.fork_edge_id), field("Source generation", origin.fork_source_gen));
+					stack.append(card("Forked from", "Parent stream", details));
+				}
+				if (edgeRows.length) {
+					stack.append(card("Downstream forks", `${edgeRows.length} children`, dataTable([
+						{ label: "Edge", key: "edge_id", className: "mono" },
+						{ label: "Fork offset", key: "fork_offset", className: "mono" },
+					], edgeRows)));
+				}
+				if (maintenanceRows.length) {
+					stack.append(card("Pending work", `${maintenanceRows.length} queued`, dataTable([
+						{ label: "Kind", key: "kind" },
+						{ label: "Edge", key: "edge_id", className: "mono" },
+						{ label: "Parent", key: "parent_path", className: "mono" },
+						{ label: "Detail", key: "detail", className: "mono muted" },
+					], maintenanceRows)));
+				}
+				if (!stack.children.length) stack.append(el("div", "empty", "This stream has no fork relationships."));
+				document.getElementById("panel-forks").replaceChildren(stack);
+			}
+
+			async function refresh() {
+				if (!authToken || refreshing) return;
+				refreshing = true;
+				const button = document.getElementById("refresh");
+				const error = document.getElementById("error");
+				button.classList.add("loading");
+				button.disabled = true;
+				try {
+					const [overview, messages, producers, origin, edges, maintenance] = await Promise.all(Object.values(SQL).map(query));
+					if ([overview, messages, producers, origin, edges, maintenance].some((rows) => rows === null)) return;
+					renderOverview(overview);
+					renderMessages(messages);
+					renderProducers(producers);
+					renderForks(origin, edges, maintenance);
+					document.getElementById("updated").textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+					error.hidden = true;
+				} catch (cause) {
+					error.textContent = cause?.message ?? String(cause);
+					error.hidden = false;
+				} finally {
+					refreshing = false;
+					button.classList.remove("loading");
+					button.disabled = false;
+				}
+			}
+
+			const tabs = [...document.querySelectorAll('[role="tab"]')];
+			function selectTab(tab) {
+				for (const candidate of tabs) {
+					const selected = candidate === tab;
+					candidate.setAttribute("aria-selected", String(selected));
+					candidate.tabIndex = selected ? 0 : -1;
+					document.getElementById(candidate.getAttribute("aria-controls")).hidden = !selected;
+				}
+			}
+			for (const tab of tabs) {
+				tab.addEventListener("click", () => selectTab(tab));
+				tab.addEventListener("keydown", (event) => {
+					if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+					event.preventDefault();
+					const direction = event.key === "ArrowRight" ? 1 : -1;
+					const next = tabs[(tabs.indexOf(tab) + direction + tabs.length) % tabs.length];
+					selectTab(next);
+					next.focus();
+				});
+			}
+
+			document.getElementById("refresh").addEventListener("click", refresh);
+			const initialTheme = new URLSearchParams(location.search).get("theme") ?? "dark";
+			document.documentElement.classList.toggle("dark", initialTheme === "dark");
+			window.addEventListener("message", (event) => {
+				if (event.origin !== SHELL_ORIGIN || event.data?.type !== "init" || event.data?.v !== 1) return;
+				authToken = event.data.authToken;
+				document.getElementById("actor-id").textContent = event.data.actorId;
+				document.getElementById("actor-id").title = event.data.actorId;
+				document.documentElement.classList.toggle("dark", (event.data.theme ?? initialTheme) === "dark");
+				refresh();
+			});
+			parent.postMessage({ type: "ready", v: 1 }, SHELL_ORIGIN);
+		</script>
+	</body>
+</html>

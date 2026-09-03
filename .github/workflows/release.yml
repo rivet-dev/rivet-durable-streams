@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  crates-io:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+
+      - name: Verify release version
+        id: version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          test "$GITHUB_REF_NAME" = "v$version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing release
+        id: existing
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if curl --fail --silent "https://crates.io/api/v1/crates/rivet-durable-streams/$VERSION" >/dev/null; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Authenticate with crates.io
+        if: steps.existing.outputs.published != 'true'
+        id: crates-io
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish
+        if: steps.existing.outputs.published != 'true'
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
