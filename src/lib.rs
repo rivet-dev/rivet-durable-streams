@@ -23,16 +23,7 @@ pub fn register(registry: &mut Registry) {
 /// The application owns this path because custom tabs are served from the
 /// final binary's filesystem.
 pub fn register_with_inspector(registry: &mut Registry, inspector_root: Option<PathBuf>) {
-    let inspector_tabs = inspector_root
-        .map(|root| {
-            vec![InspectorTabEntry::Custom {
-                id: "durable-stream".to_owned(),
-                label: "Durable Stream".to_owned(),
-                icon: Some("database".to_owned()),
-                root,
-            }]
-        })
-        .unwrap_or_default();
+    let inspector_tabs = inspector_root.map(inspector_tabs).unwrap_or_default();
     registry.register_actor_with::<DurableStreamActor>(
         ACTOR_NAME,
         ActorConfig {
@@ -43,4 +34,49 @@ pub fn register_with_inspector(registry: &mut Registry, inspector_root: Option<P
             ..ActorConfig::default()
         },
     );
+}
+
+fn inspector_tabs(root: PathBuf) -> Vec<InspectorTabEntry> {
+    [
+        ("stream-overview", "Overview", "tag"),
+        ("stream-messages", "Messages", "logs"),
+        ("stream-producers", "Producers", "microchip"),
+        ("stream-forks", "Forks", "workflow"),
+        ("stream-maintenance", "Maintenance", "wrench"),
+    ]
+    .into_iter()
+    .map(|(id, label, icon)| InspectorTabEntry::Custom {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        icon: Some(icon.to_owned()),
+        root: root.clone(),
+    })
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inspector_uses_native_tabs_with_a_shared_bundle() {
+        let root = PathBuf::from("/inspector");
+        let tabs = inspector_tabs(root.clone());
+        let ids = tabs.iter().map(InspectorTabEntry::id).collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            [
+                "stream-overview",
+                "stream-messages",
+                "stream-producers",
+                "stream-forks",
+                "stream-maintenance",
+            ]
+        );
+        assert!(tabs.iter().all(|tab| matches!(
+            tab,
+            InspectorTabEntry::Custom { root: tab_root, .. } if tab_root == &root
+        )));
+    }
 }
