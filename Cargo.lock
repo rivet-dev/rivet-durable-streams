@@ -1540,8 +1540,8 @@ dependencies = [
 
 [[package]]
 name = "rivet-depot-client-types"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 
 [[package]]
 name = "rivet-durable-streams"
@@ -1572,8 +1572,8 @@ dependencies = [
 
 [[package]]
 name = "rivet-envoy-client"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -1600,13 +1600,12 @@ dependencies = [
 
 [[package]]
 name = "rivet-envoy-protocol"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "hex",
  "rand 0.8.8",
- "rivet-util-serde",
  "rivet-vbare-compiler",
  "serde",
  "serde_bare",
@@ -1616,8 +1615,8 @@ dependencies = [
 
 [[package]]
 name = "rivet-error"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "indoc",
@@ -1628,8 +1627,8 @@ dependencies = [
 
 [[package]]
 name = "rivet-error-macros"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -1640,8 +1639,8 @@ dependencies = [
 
 [[package]]
 name = "rivet-metrics"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "lazy_static",
  "prometheus",
@@ -1649,8 +1648,8 @@ dependencies = [
 
 [[package]]
 name = "rivet-util-serde"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "indexmap",
  "serde",
@@ -1687,8 +1686,8 @@ dependencies = [
 
 [[package]]
 name = "rivetkit"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1708,8 +1707,8 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-actor-persist"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "rivet-vbare-compiler",
@@ -1720,8 +1719,8 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-client"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "base64",
@@ -1745,8 +1744,8 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-client-protocol"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "rivet-vbare-compiler",
@@ -1757,8 +1756,8 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-core"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1790,6 +1789,7 @@ dependencies = [
  "rivetkit-inspector-protocol",
  "rivetkit-shared-types",
  "scc",
+ "semver",
  "serde",
  "serde_bare",
  "serde_bytes",
@@ -1811,10 +1811,11 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-engine-process"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
+ "libc",
  "reqwest",
  "rivet-error",
  "serde",
@@ -1827,8 +1828,8 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-inspector-protocol"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "anyhow",
  "rivet-vbare-compiler",
@@ -1839,8 +1840,8 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-shared-types"
-version = "2.3.7"
-source = "git+https://github.com/rivet-dev/rivet?rev=9ecb308e908dbe6b06144b6cd92dc82a6a02542c#9ecb308e908dbe6b06144b6cd92dc82a6a02542c"
+version = "2.3.11"
+source = "git+https://github.com/rivet-dev/rivet?rev=89c31e9438cdd0f2aa387dd6224b9145697a03f8#89c31e9438cdd0f2aa387dd6224b9145697a03f8"
 dependencies = [
  "serde",
  "serde_json",
@@ -1988,6 +1989,12 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"
