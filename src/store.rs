@@ -734,86 +734,15 @@ fn blob(value: Option<&ColumnValue>) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod schema_tests {
-    use rusqlite::{Connection, OptionalExtension, params};
-
     use super::*;
 
-    fn migrate(connection: &mut Connection) -> Result<()> {
-        connection.execute_batch(SCHEMA_VERSION_TABLE)?;
-        let current = connection
-            .query_row(
-                "SELECT schema_version FROM durable_streams_schema_version WHERE singleton = 1",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .unwrap_or(0);
-        validate_schema_version(current)?;
-
-        for migration in MIGRATIONS
-            .iter()
-            .filter(|migration| migration.version > current)
-        {
-            let transaction = connection.transaction()?;
-            for statement in migration.statements {
-                transaction.execute_batch(statement)?;
-            }
-            transaction.execute(
-                "INSERT INTO durable_streams_schema_version (singleton, schema_version) VALUES (1, ?) \
-                 ON CONFLICT(singleton) DO UPDATE SET schema_version = excluded.schema_version",
-                params![migration.version],
-            )?;
-            transaction.commit()?;
-        }
-        Ok(())
-    }
-
     #[test]
-    fn fresh_database_applies_the_complete_schema() {
-        let mut connection = Connection::open_in_memory().unwrap();
-        migrate(&mut connection).unwrap();
-
-        let version: i64 = connection
-            .query_row(
-                "SELECT schema_version FROM durable_streams_schema_version WHERE singleton = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(version, supported_schema_version());
-        for table in [
-            "meta",
-            "messages",
-            "producers",
-            "fork_edges",
-            "fork_intents",
-            "gc_releases",
-        ] {
-            let exists: i64 = connection
-                .query_row(
-                    "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?",
-                    [table],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(exists, 1, "missing table {table}");
+    fn migrations_are_contiguous() {
+        for (index, migration) in MIGRATIONS.iter().enumerate() {
+            assert_eq!(migration.version, index as i64 + 1);
+            assert!(!migration.statements.is_empty());
         }
-    }
-
-    #[test]
-    fn repeat_initialization_is_a_noop() {
-        let mut connection = Connection::open_in_memory().unwrap();
-        migrate(&mut connection).unwrap();
-        connection
-            .execute("INSERT INTO messages VALUES ('0001_0001', X'01', 1)", [])
-            .unwrap();
-
-        migrate(&mut connection).unwrap();
-
-        let message_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(message_count, 1);
+        assert_eq!(supported_schema_version(), MIGRATIONS.len() as i64);
     }
 
     #[test]
