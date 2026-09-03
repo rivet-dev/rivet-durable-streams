@@ -99,7 +99,9 @@ Set a pool name to run Durable Streams separately or alongside other actor
 types registered by your workers:
 
 ```sh
-npx @rivetkit/cli@latest deploy --pool durable-streams
+npx @rivetkit/cli@latest deploy \
+  --pool durable-streams \
+  --env RIVET_POOL_NAME=durable-streams
 ```
 
 ## License

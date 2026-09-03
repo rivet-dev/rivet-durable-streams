@@ -1556,6 +1556,7 @@ dependencies = [
  "clap",
  "futures-util",
  "http",
+ "percent-encoding",
  "reqwest",
  "rivetkit",
  "rivetkit-client",

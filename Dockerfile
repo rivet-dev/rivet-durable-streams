@@ -10,6 +10,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /app/target/release/rivet-durable-streams ./rivet-durable-streams
 COPY inspector ./inspector
-ENV RIVET_PORT=3000
+ENV PORT=3000
 EXPOSE 3000
 CMD ["./rivet-durable-streams", "--host", "0.0.0.0"]
