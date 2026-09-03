@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.svg">
-    <img alt="Durable Streams and Rivet Actors" src=".github/logo-light.svg" width="280">
+    <img alt="Durable Streams and Rivet" src=".github/logo-light.svg" width="280">
   </picture>
 </p>
 
