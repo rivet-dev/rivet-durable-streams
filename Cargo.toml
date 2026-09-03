@@ -31,9 +31,10 @@ chrono = { version = "0.4.38", features = ["now"] }
 clap = { version = "4.3", features = ["derive"] }
 futures-util = "0.3"
 http = "1.3"
+percent-encoding = "2.3"
 reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls-native-roots", "rustls-tls-webpki-roots", "stream"] }
-rivetkit = { git = "https://github.com/rivet-dev/actors.git", rev = "9ecb308e908dbe6b06144b6cd92dc82a6a02542c" }
-rivetkit-client = { git = "https://github.com/rivet-dev/actors.git", rev = "9ecb308e908dbe6b06144b6cd92dc82a6a02542c" }
+rivetkit = { git = "https://github.com/rivet-dev/rivet", rev = "9ecb308e908dbe6b06144b6cd92dc82a6a02542c" }
+rivetkit-client = { git = "https://github.com/rivet-dev/rivet", rev = "9ecb308e908dbe6b06144b6cd92dc82a6a02542c" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.128", features = ["raw_value"] }
 sha2 = "0.10"

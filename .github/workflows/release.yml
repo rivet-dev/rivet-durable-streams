@@ -49,3 +49,14 @@ jobs:
         run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
+
+      - name: Notify managed services
+        env:
+          GH_TOKEN: ${{ secrets.MANAGED_SERVICES_DISPATCH_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh api --method POST /repos/rivet-dev/managed-services/dispatches \
+            -f event_type=downstream-release \
+            -f client_payload[product]=durable-streams \
+            -f client_payload[version]="$VERSION" \
+            -f client_payload[sha]="$GITHUB_SHA"
