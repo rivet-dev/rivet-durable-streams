@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "aho-corasick"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1005,6 +1014,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
+
+[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1053,6 +1071,15 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "nu-ansi-term"
+version = "0.50.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1421,6 +1448,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-automata"
+version = "0.4.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-syntax",
+]
+
+[[package]]
+name = "regex-syntax"
+version = "0.8.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1481,9 +1525,9 @@ dependencies = [
 
 [[package]]
 name = "rivet-depot-client-types"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ccc2a9eb2d4a74f0feb46c3a7063af259750072525da406026ed1127c03e45c"
+checksum = "e7304721e122c9b7032c04dc9c9f726a8ed2ec9727a96f7295ac3e14944fe112"
 
 [[package]]
 name = "rivet-durable-streams"
@@ -1507,15 +1551,16 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-util",
+ "tracing-subscriber",
  "url",
  "uuid",
 ]
 
 [[package]]
 name = "rivet-envoy-client"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daf72d566ddebb5bb831d8ca9a663aa4200f23984eadf41d5b5e350690aa9c31"
+checksum = "6c0cfb00d969a492edb37db190a782108c59dcbef028c6b2afe15c9f91990e4b"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -1542,9 +1587,9 @@ dependencies = [
 
 [[package]]
 name = "rivet-envoy-protocol"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc4bfe1bcd80460448094c7d857f05f6254893683e569230d87a0de8725d2be3"
+checksum = "f9c9c1a0788c032f8889c6cb9e97abc912a16e5c2de29b23f7f5c63162b63116"
 dependencies = [
  "anyhow",
  "hex",
@@ -1558,9 +1603,9 @@ dependencies = [
 
 [[package]]
 name = "rivet-error"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b02518a8eba54bd82c3eacf574e88bef0f669cf838450dc6e4d99b73ee42310"
+checksum = "d0df9a99e401e1c034320e3da812f2187e44e7f46ef8f03cf24e648d1d44c5bc"
 dependencies = [
  "anyhow",
  "indoc",
@@ -1571,9 +1616,9 @@ dependencies = [
 
 [[package]]
 name = "rivet-error-macros"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecee4018151d1e24e2e28453aedf594b656a079c92d8bf399e2e2d13c63c08cb"
+checksum = "5a470fe486423b3bb1341a23dcb7bd1cbff7063a7a74e1f1a127f66b9c7b1066"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -1584,9 +1629,9 @@ dependencies = [
 
 [[package]]
 name = "rivet-metrics"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d48e2c423d9b89b4bb1db83e001895103a661f46217ae07534fb6542b3d2f97"
+checksum = "b5e3ea318e9bc8430b58901131845f50169aef5c1a72d6ec0bce82a166bee19f"
 dependencies = [
  "lazy_static",
  "prometheus",
@@ -1594,9 +1639,9 @@ dependencies = [
 
 [[package]]
 name = "rivet-util-serde"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c93a4a92c901d7c1ad9ded882f5d9899006e968ad1092fbb44490dcb3fa25569"
+checksum = "ed1e79f7c51b6caa0aa9427c22627438d044004d1ea3bc1af934a635e8863e74"
 dependencies = [
  "indexmap",
  "serde",
@@ -1633,12 +1678,14 @@ dependencies = [
 
 [[package]]
 name = "rivetkit"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f15d34ea5a55a5e48bbcb15cff47426c1afa9123bd3c144b4f07a6a7c45e67e"
+checksum = "eae9d3956498a74a58ea413b81e161fe36a9ab8a48316500f6d30493438e951e"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
+ "bytes",
  "ciborium",
  "futures",
  "http",
@@ -1649,15 +1696,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
 ]
 
 [[package]]
 name = "rivetkit-actor-persist"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8723a02a493e514178184ca48450daca737e723bb3d73a1c13988239a0db17aa"
+checksum = "3e388cfdb1d9dfd4cb0c586e87e7367f35b1251e31cb782ce6e708d004994a22"
 dependencies = [
  "anyhow",
  "rivet-vbare-compiler",
@@ -1668,9 +1716,9 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-client"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9994983f5dfb3684974f85450b4ce1c6aea2a37c70b046f803b24e538ae9e2bf"
+checksum = "fc3ab28035caa8d1a6237fbd61475521ee6139d7cc7e3c46fae40743d489917d"
 dependencies = [
  "anyhow",
  "base64",
@@ -1694,9 +1742,9 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-client-protocol"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7a8f38627278c20661439fd7ceec27f78f9f466fd4602af2d71f30ec9b6992"
+checksum = "95dd8ec14b26a100df05fb61a1c3c963fe082fae5a1f32b1abf333a1ca384899"
 dependencies = [
  "anyhow",
  "rivet-vbare-compiler",
@@ -1707,9 +1755,9 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-core"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb1f8db9bbd4593bbab5518ca489be5de118cfc62501306bdf6e2c02e32f0030"
+checksum = "015e434ca9d944c52a829bd76a8d05a839c5ed8684a98e86ad067f8eb789a6a2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1762,9 +1810,9 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-engine-process"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04de98ce4ac321ab3b164862e48547f47e57e5998c3241eed42adcb39741c419"
+checksum = "9533b1e02cf4597dd05acae4f52bfb7b08b98d79c2d75cfffe1a31544559b751"
 dependencies = [
  "anyhow",
  "libc",
@@ -1780,9 +1828,9 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-inspector-protocol"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76f73d7b27251e306d9c206626fefc8c9961301ba86c36c3fe349da0c9910035"
+checksum = "7818baedcc87bcd0ee1161b0e44e36aefec2ad0e05a02c9480c7a8f112035d14"
 dependencies = [
  "anyhow",
  "rivet-vbare-compiler",
@@ -1793,9 +1841,9 @@ dependencies = [
 
 [[package]]
 name = "rivetkit-shared-types"
-version = "2.3.15"
+version = "2.3.16-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82c9a15d8e91112b40255e4dcfaf4207fd661ebc70f7de3fc4f70440f4e16851"
+checksum = "682d396bf9ae4cb4c0a651a3fe322c3e9085d62c5bbcd7302ea15dc5b12161a9"
 dependencies = [
  "serde",
  "serde_json",
@@ -2048,6 +2096,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2210,6 +2267,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.4",
+]
+
+[[package]]
+name = "thread_local"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
+dependencies = [
+ "cfg-if",
 ]
 
 [[package]]
@@ -2404,6 +2470,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+ "valuable",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+dependencies = [
+ "matchers",
+ "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
+ "sharded-slab",
+ "smallvec",
+ "thread_local",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -2533,6 +2629,12 @@ dependencies = [
  "serde_core",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vbare"

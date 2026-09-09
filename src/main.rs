@@ -23,6 +23,13 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Honor RUST_LOG when set; otherwise default to debug for rivetkit so its
+    // internal logs are visible without extra configuration.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("info,rivetkit=debug,rivetkit_core=debug")
+    });
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
     let args = Args::parse();
     let port = match args.port {
         Some(port) => port,

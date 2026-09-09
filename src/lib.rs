@@ -51,6 +51,22 @@ fn inspector_tabs(root: PathBuf) -> Vec<InspectorTabEntry> {
         icon: Some(icon.to_owned()),
         root: root.clone(),
     })
+    // Hide every hideable built-in tab; a durable stream only exposes its
+    // own custom tabs. These ids are the full BUILTIN_TAB_IDS set. (The
+    // "Metadata" tab is not in that set and cannot be hidden via this API.)
+    .chain(
+        [
+            "workflow",
+            "database",
+            "state",
+            "queue",
+            "schedules",
+            "connections",
+            "console",
+        ]
+        .into_iter()
+        .map(|id| InspectorTabEntry::HideBuiltin { id: id.to_owned() }),
+    )
     .collect()
 }
 
