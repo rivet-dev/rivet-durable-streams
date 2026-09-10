@@ -78,10 +78,15 @@ mod tests {
     fn inspector_uses_native_tabs_with_a_shared_bundle() {
         let root = PathBuf::from("/inspector");
         let tabs = inspector_tabs(root.clone());
-        let ids = tabs.iter().map(InspectorTabEntry::id).collect::<Vec<_>>();
 
+        // Custom tabs come first and all share the one bundle root.
+        let custom_ids = tabs
+            .iter()
+            .filter(|tab| matches!(tab, InspectorTabEntry::Custom { .. }))
+            .map(InspectorTabEntry::id)
+            .collect::<Vec<_>>();
         assert_eq!(
-            ids,
+            custom_ids,
             [
                 "stream-overview",
                 "stream-messages",
@@ -90,9 +95,30 @@ mod tests {
                 "stream-maintenance",
             ]
         );
-        assert!(tabs.iter().all(|tab| matches!(
-            tab,
-            InspectorTabEntry::Custom { root: tab_root, .. } if tab_root == &root
-        )));
+        assert!(tabs.iter().all(|tab| match tab {
+            InspectorTabEntry::Custom { root: tab_root, .. } => tab_root == &root,
+            InspectorTabEntry::HideBuiltin { .. } => true,
+        }));
+
+        // Every hideable built-in tab is hidden.
+        let hidden_ids = tabs
+            .iter()
+            .filter_map(|tab| match tab {
+                InspectorTabEntry::HideBuiltin { id } => Some(id.as_str()),
+                InspectorTabEntry::Custom { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hidden_ids,
+            [
+                "workflow",
+                "database",
+                "state",
+                "queue",
+                "schedules",
+                "connections",
+                "console",
+            ]
+        );
     }
 }
