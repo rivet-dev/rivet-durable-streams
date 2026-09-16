@@ -50,9 +50,11 @@ async fn main() -> anyhow::Result<()> {
         axum::Router::new().nest("/v1/stream", durable_streams_router(client, streams_config));
 
     let mut registry = Registry::new();
+    // Prefer the checkout's live inspector bundle over the embedded one.
+    let checkout_inspector = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("inspector");
     register_with_inspector(
         &mut registry,
-        Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("inspector")),
+        checkout_inspector.is_dir().then_some(checkout_inspector),
     );
     let serverless = std::env::var("RIVETKIT_RUNTIME_MODE")
         .is_ok_and(|value| value.eq_ignore_ascii_case("serverless"));

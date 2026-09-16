@@ -30,6 +30,7 @@ chrono = "0.4.38"
 clap = { version = "4.3", features = ["derive"] }
 futures-util = "0.3"
 http = "1.3"
+include_dir = "0.7"
 percent-encoding = "2.3"
 # RivetKit returns reqwest responses; enable their streaming body API.
 reqwest = { version = "0.12.22", default-features = false, features = ["stream"] }
@@ -38,8 +39,10 @@ rivetkit-client = "=2.3.16"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.128"
 sha2 = "0.10"
+tempfile = "3"
 tokio = { version = "1.44", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7"
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5"
 uuid = { version = "1.11", features = ["v4"] }
