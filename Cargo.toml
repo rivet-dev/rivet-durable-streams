@@ -17,8 +17,13 @@ include = [
     "Cargo.toml",
     "Cargo.lock",
     "README.md",
+    "docs/subscriptions.md",
     "LICENSE",
 ]
+
+[features]
+# Deterministic crash windows for the real-Engine recovery harness only.
+subscription-fault-injection = []
 
 [dependencies]
 anyhow = "1"
@@ -31,9 +36,11 @@ clap = { version = "4.3", features = ["derive"] }
 futures-util = "0.3"
 http = "1.3"
 include_dir = "0.7"
+jsonwebtoken = { version = "9", default-features = false }
 percent-encoding = "2.3"
 # RivetKit returns reqwest responses; enable their streaming body API.
-reqwest = { version = "0.12.22", default-features = false, features = ["stream"] }
+reqwest = { version = "0.12.22", default-features = false, features = ["stream", "rustls-tls"] }
+ring = "0.17"
 rivetkit = "=2.3.16"
 rivetkit-client = "=2.3.16"
 serde = { version = "1", features = ["derive"] }

@@ -113,3 +113,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for running the server from source and te
 ## License
 
 Apache 2.0
+
+Subscription delivery, authentication, and recovery are described in [Subscriptions](docs/subscriptions.md).

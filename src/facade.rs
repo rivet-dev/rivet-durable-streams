@@ -1,4 +1,6 @@
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::OnceCell;
 
 use axum::Router;
 use axum::body::Body;
@@ -21,6 +23,7 @@ const EXPOSE_HEADERS: &str = "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Da
 
 #[derive(Clone, Debug)]
 pub struct DurableStreamsConfig {
+    pub subscriptions: crate::subscriptions::facade::SubscriptionConfig,
     /// Separates deterministic actor keys between applications or tenants.
     pub tenant_scope: String,
     /// Public origin used to construct the `Location` header on create.
@@ -35,6 +38,7 @@ pub struct DurableStreamsConfig {
 impl Default for DurableStreamsConfig {
     fn default() -> Self {
         Self {
+            subscriptions: Default::default(),
             tenant_scope: "default".to_owned(),
             public_origin: None,
             body_timeout: Duration::from_secs(15),
@@ -45,6 +49,7 @@ impl Default for DurableStreamsConfig {
 
 #[derive(Clone)]
 struct FacadeState {
+    catalog_initialized: Arc<OnceCell<()>>,
     client: Client,
     config: DurableStreamsConfig,
 }
@@ -58,7 +63,11 @@ pub fn durable_streams_router(client: Client, config: DurableStreamsConfig) -> R
     Router::new()
         .route("/", any(handle_root))
         .route("/{*path}", any(handle))
-        .with_state(FacadeState { client, config })
+        .with_state(FacadeState {
+            client,
+            config,
+            catalog_initialized: Arc::new(OnceCell::new()),
+        })
 }
 
 async fn handle_root(method: Method) -> Response {
@@ -92,6 +101,16 @@ async fn handle(
         return response;
     }
 
+    // Resolve control routing and actor identity within the same mount. Reject
+    // traversal before URL canonicalization can move a stream into __ds or out
+    // of the router's stream root.
+    if uri.path().split('/').any(|segment| {
+        let decoded = percent_encoding::percent_decode_str(segment).decode_utf8_lossy();
+        decoded == "." || decoded == ".." || decoded.contains('\\')
+    }) {
+        return cors_response(StatusCode::BAD_REQUEST, Body::from("Invalid stream path"));
+    }
+
     // Actor identity uses the complete public path. This deliberately matches
     // Stream-Forked-From, whose value is a path relative to this same server.
     let canonical_path = match canonical_stream_path(original_uri.path()) {
@@ -101,9 +120,6 @@ async fn handle(
         }
     };
     let routed_path = uri.path();
-    if routed_path.ends_with("/__ds") || routed_path.contains("/__ds/") {
-        return cors_response(StatusCode::NOT_FOUND, Body::from("Stream not found"));
-    }
 
     let body = match tokio::time::timeout(
         state.config.body_timeout,
@@ -129,6 +145,21 @@ async fn handle(
         }
     };
 
+    let decoded_path = percent_encoding::percent_decode_str(routed_path).decode_utf8_lossy();
+    if decoded_path.trim_start_matches('/').split('/').next() == Some("__ds") {
+        return crate::subscriptions::facade::route(
+            &state.client,
+            &state.config,
+            &state.catalog_initialized,
+            original_uri.path(),
+            routed_path,
+            method,
+            &headers,
+            &body,
+        )
+        .await;
+    }
+
     let actor_key = stream_actor_key(&state.config.tenant_scope, &canonical_path);
     let actor = if method == Method::PUT {
         state.client.get_or_create(
@@ -136,7 +167,7 @@ async fn handle(
             vec![actor_key],
             GetOrCreateOptions {
                 create_with_input: Some(json!({
-                    "path": canonical_path,
+                    "path": canonical_path.clone(),
                     "tenant_scope": state.config.tenant_scope.clone(),
                 })),
                 ..GetOrCreateOptions::default()
@@ -192,12 +223,26 @@ async fn handle(
             }
         }
     };
-    let actor_headers = match bridge_request_headers(&headers) {
+    let mut actor_headers = match bridge_request_headers(&headers) {
         Ok(headers) => headers,
         Err(message) => {
             return cors_response(StatusCode::BAD_REQUEST, Body::from(message));
         }
     };
+    // Guard verifies this server-owned identity against the actor key and uses
+    // it to authorize reads from a fork's source stream.
+    for (name, value) in [
+        ("x-rivet-stream-path", canonical_path.as_str()),
+        ("x-rivet-stream-tenant", state.config.tenant_scope.as_str()),
+    ] {
+        let Ok(value) = HeaderValue::from_str(value) else {
+            return cors_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Body::from("Invalid stream identity"),
+            );
+        };
+        actor_headers.insert(name, value);
+    }
     let actor_path = match uri.query() {
         Some(query) => format!("protocol?{query}"),
         None => "protocol".to_owned(),
@@ -287,7 +332,7 @@ async fn collect_bounded_body(body: Body, limit: usize) -> Result<Option<Bytes>,
     Ok((!too_large).then(|| collected.freeze()))
 }
 
-fn bridge_request_headers(headers: &HeaderMap) -> Result<HeaderMap, String> {
+pub(crate) fn bridge_request_headers(headers: &HeaderMap) -> Result<HeaderMap, String> {
     let mut bridged = HeaderMap::new();
     for name in BRIDGED_REQUEST_HEADERS {
         let header_name = HeaderName::from_static(name);
@@ -323,7 +368,7 @@ pub(crate) fn stream_actor_key(tenant_scope: &str, path: &str) -> String {
     format!("{:x}", hash.finalize())
 }
 
-fn cors_response(status: StatusCode, body: Body) -> Response {
+pub(crate) fn cors_response(status: StatusCode, body: Body) -> Response {
     let mut response = Response::builder()
         .status(status)
         .body(body)

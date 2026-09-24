@@ -4,7 +4,7 @@ impl DurableStreamActor {
     pub(super) fn source_handle(&self, ctx: &Ctx<Self>, path: &str) -> Result<ClientActorHandle> {
         let state = ctx.state();
         let key = stream_actor_key(&state.tenant_scope, path);
-        ctx.client()?.get_or_create(
+        self.client.get_or_create(
             ACTOR_NAME,
             vec![key],
             GetOrCreateOptions {
@@ -300,13 +300,14 @@ impl DurableStreamActor {
                 tx.rollback().await?;
                 return Err(anyhow!("stream was created during fork acquisition"));
             }
+            let created_at = now_ms();
             create_meta(
                 &tx,
                 Some(&resolved_content_type),
                 effective_ttl,
                 effective_expires_at.as_deref(),
                 options.closed,
-                options.now_ms,
+                created_at,
                 Some(options.parent_path),
                 Some(&fork_offset),
                 options
@@ -320,15 +321,22 @@ impl DurableStreamActor {
             let mut current_offset = fork_offset.clone();
             if let Some(prefix) = sub_offset_prefix {
                 current_offset =
-                    store::append_message(&tx, &current_offset, prefix, options.now_ms).await?;
+                    store::append_message(&tx, &current_offset, prefix, created_at).await?;
+                // A partial inherited record is historical fork data too.
+                store::set_subscription_start(&tx, &current_offset).await?;
             }
             if let Some(payload) = initial_payload
                 && !payload.is_empty()
             {
                 current_offset =
-                    store::append_message(&tx, &current_offset, payload, options.now_ms).await?;
+                    store::append_message(&tx, &current_offset, payload, created_at).await?;
             }
             delete_fork_intent(&tx, &edge_id).await?;
+            // Acquiring the parent and copying a prefix can take most of a
+            // short TTL. Start it when the new stream is ready to commit.
+            if effective_ttl.is_some() {
+                touch(&tx, now_ms()).await?;
+            }
             tx.commit().await?;
             Ok::<_, anyhow::Error>(current_offset)
         }

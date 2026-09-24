@@ -24,6 +24,7 @@ impl DurableStreamActor {
     }
 
     pub(super) async fn run_maintenance(&self, ctx: &Ctx<Self>) -> Result<()> {
+        *self.subscription_recovery_armed.lock().await = false;
         if get_meta(ctx.sql()).await?.is_none() {
             self.reconcile_fork_intents(ctx).await?;
         }
@@ -32,6 +33,12 @@ impl DurableStreamActor {
             && !meta.soft_deleted
         {
             self.schedule_expiry(ctx, &meta).await?;
+        }
+        if store::subscription_outbox(ctx.sql())
+            .await?
+            .is_some_and(|outbox| outbox.dirty)
+        {
+            self.arm_subscription_recovery(ctx).await?;
         }
         Ok(())
     }

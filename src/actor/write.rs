@@ -134,7 +134,6 @@ impl DurableStreamActor {
                         expires_at: expires_at.as_deref(),
                         closed: create_closed,
                         body: request.body(),
-                        now_ms: now,
                     },
                 )
                 .await;
@@ -182,6 +181,9 @@ impl DurableStreamActor {
         if !payload.is_empty() {
             current_offset = store::append_message(&tx, &current_offset, payload, now).await?;
         }
+        if ttl_seconds.is_some() {
+            touch(&tx, now_ms()).await?;
+        }
         tx.commit().await?;
         self.notify_change();
         if let Some(meta) = get_meta(ctx.sql()).await? {
@@ -200,6 +202,15 @@ impl DurableStreamActor {
     }
 
     pub(super) async fn handle_post(&self, ctx: &Ctx<Self>, request: &Request) -> Result<Response> {
+        self.handle_post_inner(ctx, request, None).await
+    }
+
+    pub(super) async fn handle_post_inner(
+        &self,
+        ctx: &Ctx<Self>,
+        request: &Request,
+        subscription_wake: Option<&str>,
+    ) -> Result<Response> {
         if request.body().len() > MAX_BODY_BYTES {
             return text_response(413, "Payload too large", [] as [(&str, &str); 0]);
         }
@@ -301,6 +312,9 @@ impl DurableStreamActor {
         }
         let new_offset =
             store::append_message(&tx, &fresh_meta.current_offset, payload, now).await?;
+        if let Some(origin) = subscription_wake {
+            store::record_subscription_wake(&tx, &fresh_meta.current_offset, origin).await?;
+        }
         if let (Some(producer), Some(state)) = (&producer, &producer_state) {
             commit_producer_state(&tx, producer.id.clone(), state).await?;
         }

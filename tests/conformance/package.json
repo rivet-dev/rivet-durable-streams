@@ -1,0 +1,12 @@
+{
+  "name": "rivet-durable-streams-conformance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts --reporter=verbose"
+  },
+  "devDependencies": {
+    "@durable-streams/server-conformance-tests": "0.3.7",
+    "vitest": "4.0.18"
+  }
+}
