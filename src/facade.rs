@@ -50,6 +50,7 @@ impl Default for DurableStreamsConfig {
 #[derive(Clone)]
 struct FacadeState {
     catalog_initialized: Arc<OnceCell<()>>,
+    actor_routing_initialized: Arc<OnceCell<()>>,
     client: Client,
     config: DurableStreamsConfig,
 }
@@ -67,6 +68,7 @@ pub fn durable_streams_router(client: Client, config: DurableStreamsConfig) -> R
             client,
             config,
             catalog_initialized: Arc::new(OnceCell::new()),
+            actor_routing_initialized: Arc::new(OnceCell::new()),
         })
 }
 
@@ -158,6 +160,23 @@ async fn handle(
             &body,
         )
         .await;
+    }
+
+    if state.config.subscriptions.actor_routing {
+        let configured = state.actor_routing_initialized.get_or_try_init(|| async {
+            let origin = state.config.public_origin.as_deref().ok_or_else(|| anyhow::anyhow!("Actor routing requires public_origin"))?;
+            let root = original_uri.path().strip_suffix(routed_path).unwrap_or("").trim_end_matches('/');
+            let manager = crate::subscriptions::handle(&state.client, &state.config.tenant_scope)?;
+            manager.action("__durableStreamConfigureActorRouting", vec![json!({"root":root, "public_base":format!("{}{root}", origin.trim_end_matches('/'))})]).await?;
+            Ok::<_, anyhow::Error>(())
+        }).await;
+        if let Err(error) = configured {
+            tracing::warn!(?error, "Actor stream routing is not ready");
+            return cors_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                Body::from("Actor stream routing is not ready"),
+            );
+        }
     }
 
     let actor_key = stream_actor_key(&state.config.tenant_scope, &canonical_path);

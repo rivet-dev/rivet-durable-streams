@@ -1,5 +1,6 @@
 //! Durable subscription coordinator. One actor owns a tenant's catalog and cursors;
 //! stream actors publish a transactional outbox into this owner.
+mod actor_routing;
 pub(crate) mod catalog_import;
 mod db;
 mod engine;
@@ -52,6 +53,7 @@ pub struct SubscriptionActor {
     lock: Mutex<()>,
     pumping: AtomicBool,
     alarm: Mutex<Option<(i64, String)>>,
+    routes_refreshed: Mutex<i64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CatalogChanged(pub CatalogEntry);
@@ -138,7 +140,13 @@ pub fn handle(client: &Client, tenant: &str) -> Result<ActorHandle> {
 impl Actor for SubscriptionActor {
     type State = Input;
     type Input = Input;
-    type Actions = (CatalogChanged, Tick, Control, CatalogReady);
+    type Actions = (
+        CatalogChanged,
+        Tick,
+        Control,
+        CatalogReady,
+        actor_routing::Configure,
+    );
     type Events = ();
     type Queue = ();
     type ConnParams = ();
@@ -150,6 +158,7 @@ impl Actor for SubscriptionActor {
     }
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
         db::ensure(ctx.sql()).await?;
+        actor_routing::ensure(ctx.sql()).await?;
         ctx.sql().exec("CREATE TABLE IF NOT EXISTS subscription_engine_identity (id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)").await?;
         let runtime = ctx.inner();
         let connection = catalog_import::CatalogApi {
@@ -171,6 +180,7 @@ impl Actor for SubscriptionActor {
             lock: Mutex::new(()),
             pumping: AtomicBool::new(false),
             alarm: Mutex::new(None),
+            routes_refreshed: Mutex::new(0),
         })
     }
     async fn on_start(self: Arc<Self>, ctx: Ctx<Self>) -> Result<()> {
@@ -273,6 +283,7 @@ impl SubscriptionActor {
         let _guard = self.lock.lock().await;
         self.arm(ctx, now_ms() + 1_000).await?;
         let tx = db::begin(ctx.sql()).await?;
+        actor_routing::enqueue(&tx, &entry).await?;
         db::save_catalog(&tx, &entry).await?;
         // Stream responses wait for this durable catalog update. Fanout runs
         // separately in bounded pump transactions.
@@ -523,6 +534,27 @@ impl SubscriptionActor {
         let tx = db::begin(ctx.sql()).await?;
         let key = db::key(&request.root, id);
         let existing = db::load(&tx, &key).await?;
+        if matches!(
+            request.operation.as_str(),
+            "put" | "delete" | "add" | "remove"
+        ) && !tx
+            .execute(
+                "SELECT sub_key FROM actor_route_links WHERE sub_key=? LIMIT 1",
+                Some(vec![text(&key)]),
+            )
+            .await?
+            .rows
+            .is_empty()
+        {
+            tx.rollback().await?;
+            return Ok(ApiError::new(
+                409,
+                "ACTOR_MANAGED_SUBSCRIPTION",
+                "Update the actor declaration to change this subscription",
+            )
+            .into());
+        }
+
         if let Some(config) = config {
             if let Some(sub) = existing.as_ref().filter(|s| !s.deleted) {
                 let reply = if sub.config_hash == config.hash() {
@@ -885,6 +917,8 @@ impl SubscriptionActor {
             }
         }
         let _reset = Reset(&self.pumping);
+        self.refresh_actor_routes(&ctx).await?;
+        self.reconcile_actor_routes(&ctx).await?;
         // Fanout and reservation can each rewrite a maximum-size snapshot.
         // Commit separately and release the mutation lock between those steps.
         self.fanout_tick(&ctx).await?;

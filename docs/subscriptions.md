@@ -106,3 +106,38 @@ HTTP test files run sequentially so large subscription fixtures do not consume t
 The recovery harness `tests/subscription_recovery.py` runs separate server processes against an existing test Engine using `RIVET_TOKEN` and `RIVET_NAMESPACE`. Build with `cargo build --locked --features subscription-fault-injection` before running it. That opt-in feature exposes no HTTP endpoint; environment-selected checkpoints terminate the test process at committed-data and delivery-intent boundaries. Production builds leave it disabled.
 
 The test Engine also uses a 250 ms actor rescheduling base delay and maximum backoff exponent of 1. Engine 2.3.16's default allocation backoff can delay actors for several minutes after repeated runner restarts; these test-only settings let the crash tests finish promptly. Subscription retry deadlines and lease durations retain their normal values. The tests do not establish a recovery-time bound for production Engine defaults.
+
+
+## Rivet Actor declarations (opt in)
+
+Set `DS_ACTOR_ROUTING=1` in the standalone server or enable
+`SubscriptionConfig.actor_routing` when embedding the router. Configure
+`public_origin` (`PUBLIC_ORIGIN` in the server). The coordinator uses its resolved
+Rivet runtime connection and namespace to read `/actors/names`; the runtime token
+needs actor list/create and gateway access as well as the signing permissions above.
+This requires an Engine that publishes `streamSubscriptionSources` metadata.
+
+RivetKit publishes a complete subscription set per actor type and pool. Increment
+`envoy.version` when changing declarations. DS adopts changes about every five
+seconds and materializes ordinary signed webhook subscriptions:
+
+- Primary: `actor-{actorId}`, reading `actors/{actorName}/{actorId}`.
+- Named: `actor-{actorId}-{subscriptionName}`, with one checkpoint per source.
+- Named URLPattern path captures map to complete actor-key components. Key routes
+  get or create the actor in the declaring pool. ID routes only address existing
+  actors of the declared type in the configured namespace and pool.
+- A matching write is journaled before catalog acceptance. New memberships start
+  before that write, including data in the first PUT. Primary declarations also
+  reconcile existing streams to recover publication races. Named declarations
+  start with writes accepted after metadata adoption; they do not replay history.
+- Restarts preserve memberships, acknowledgements, and pending reconciliation.
+  Removing a declaration removes only its managed memberships. Delayed metadata
+  from an older deployment cannot restore a removed rule.
+- Managed memberships cannot be changed through subscription management PUT,
+  DELETE, add, or remove operations while owned by the actor integration. Change
+  the actor declaration instead. Reads and standard callback acknowledgements work
+  normally.
+
+This is a Rivet integration layered over the subscription protocol, not a new
+standard delivery mode. The standard signature, callback, heartbeat, and lease
+rules are unchanged. Retention is still independent of consumer progress.
