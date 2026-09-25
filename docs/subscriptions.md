@@ -40,6 +40,23 @@ For webhooks, replace `type` with `webhook` and `wake_stream` with `"webhook":{"
 
 The signature header is `Webhook-Signature: t=<unix-seconds>,kid=<key-id>,ed25519=<signature>`. Decode the unpadded base64url signature and verify Ed25519 over the timestamp's ASCII bytes, a literal `.` byte, and the unchanged request body. Reject timestamps outside a five-minute freshness window. Select the key using the header's `kid`; subscription metadata can race a rotation.
 
+## Rivet gateway authentication
+
+Webhook delivery to the process's configured Rivet gateway automatically uses
+the process's existing Rivet token in `x-rivet-token`. The destination must match
+the configured Engine origin (scheme, host and port) and its `/gateway/{actor}/`
+path prefix. Other destinations receive no Rivet credential. Delivery still
+includes the standard webhook signature; receivers must verify it separately.
+Redirects and environment HTTP proxies remain disabled.
+
+Subscription management is privileged: this feature lets a subscription invoke
+actors with the service process's gateway permissions. Only trusted operators
+should hold the management credential. Before exposing registration to tenants,
+enforce destination actor and namespace permissions and ensure the gateway
+consumes the token without forwarding it to user handlers or request logs.
+Token rotation follows the host runtime's configured Rivet credentials; tokens
+are not stored in subscription URLs or configuration records.
+
 ## Recovery and lifecycle
 
 Configuration, memberships, cursors, active wakes, retry deadlines, leases and notification intents live in actor SQLite storage. Engine owns webhook private keys and application-token issuance. A committed append is retried into the catalog after a crash. Delivery is at least once; receivers must tolerate repeated wake IDs. Pull-wake publication uses a durable producer identity to deduplicate retries, and claims remain serialized across restarts.
