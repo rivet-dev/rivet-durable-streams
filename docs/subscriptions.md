@@ -8,7 +8,7 @@ The [Node implementation](https://github.com/durable-streams/durable-streams/blo
 
 Set `PUBLIC_ORIGIN` to the externally reachable origin, for example `https://streams.gameinc.io`. The server adds its stream root (`/v1/stream` in the standalone binary) when constructing callback and JWKS URLs. Forwarded host headers do not control these URLs.
 
-Set `DS_SUBSCRIPTIONS_MANAGEMENT_TOKEN` and send it as `Authorization: Bearer <token>` on subscription management and claim requests. Callback, ack and release requests require their own wake capability token. JWKS is public. Engine credentials authenticate internal actor traffic; they are not public client credentials. Protect ordinary stream operations through your application's existing access-control boundary.
+Set `DS_SUBSCRIPTIONS_MANAGEMENT_TOKEN` and send it as `Authorization: Bearer <token>` on subscription management and claim requests. Callback, ack and release requests require their own wake capability token. JWKS is public. Engine credentials authenticate internal actor traffic; they are not public client credentials. Ordinary stream operations require the caller's Rivet credential, as described below.
 
 The same `RIVET_ENDPOINT`, `RIVET_NAMESPACE`, and `RIVET_TOKEN` connection supplies Engine signing. Issue a namespace-scoped Engine JWT through `/auth/tokens` with `application_token/create` and `webhook_signing/create`, plus the actor and runner grants needed by your deployment. Add `namespace/read` for namespace lookup and `datacenter/list` for RivetKit routing. The JWT's namespace must match `RIVET_NAMESPACE`. An Engine build containing the purpose-specific application-token and webhook-signing APIs is required; released Engine 2.3.16 does not provide them.
 
@@ -42,20 +42,39 @@ The signature header is `Webhook-Signature: t=<unix-seconds>,kid=<key-id>,ed2551
 
 ## Rivet gateway authentication
 
-Webhook delivery to the process's configured Rivet gateway automatically uses
-the process's existing Rivet token in `x-rivet-token`. The destination must match
-the configured Engine origin (scheme, host and port) and its `/gateway/{actor}/`
-path prefix. Other destinations receive no Rivet credential. Delivery still
-includes the standard webhook signature; receivers must verify it separately.
-Redirects and environment HTTP proxies remain disabled.
+DS adds its process Rivet token to a wake only when every source matches a
+trusted deployed declaration from `/actors/names`. It verifies captures, actor
+name, namespace, deployment pool, and the resolved destination. The URL must be
+exactly the configured Engine origin and
+`/gateway/{actorId}/internal/streams/wake`. Arbitrary management webhooks receive
+no Rivet credential, including webhooks aimed at other gateway paths. Delivery
+still includes the standard signature, which the actor verifies. Redirects and
+HTTP proxies are disabled. Credentials are attached at delivery time and are
+never persisted in subscription configuration.
 
-Subscription management is privileged: this feature lets a subscription invoke
-actors with the service process's gateway permissions. Only trusted operators
-should hold the management credential. Before exposing registration to tenants,
-enforce destination actor and namespace permissions and ensure the gateway
-consumes the token without forwarding it to user handlers or request logs.
-Token rotation follows the host runtime's configured Rivet credentials; tokens
-are not stored in subscription URLs or configuration records.
+Resolved actor destinations are cached in SQLite. Metadata changes invalidate
+changed mappings. DS confirms missing/destroyed actors with Engine before
+replacing keyed destinations. Primary streams remain bound to the original
+actor ID and stop delivery when it is destroyed. Transient failures retry the
+same destination.
+
+## Stream HTTP authorization
+
+Send the caller's Rivet credential as `Authorization: Bearer <token>` or
+`x-rivet-token`. DS preserves it for storage actor lookup, creation, and data
+requests. Missing or rejected credentials never fall back to the process token.
+Embedding applications must populate `DurableStreamsConfig.data_client` from
+their resolved Rivet client configuration; this copies connection coordinates,
+not service credentials.
+
+An Engine build with stream grants is required. `actor_gateway/append` is paired
+with `actor_stream/append` for the same actor ID when issuing tokens. This allows
+both the actor append endpoint and direct primary-stream appends. It does not
+allow read, close, delete, or writes to additional subscriptions. Generic streams
+use `durable_stream` grants. Engine binds authority to the actual storage actor's
+deterministic key and checks the requested operation, including separate close
+and fork-source read permissions. The DS process needs its own stream permissions
+for asynchronous service work; actor hosts need stream read permissions to consume.
 
 ## Recovery and lifecycle
 

@@ -31,6 +31,7 @@ async-trait = "0.1"
 axum = { version = "0.8", features = ["http2"] }
 base64 = "0.22"
 bytes = "1.6"
+ciborium = "0.2"
 chrono = "0.4.38"
 clap = { version = "4.3", features = ["derive"] }
 futures-util = "0.3"

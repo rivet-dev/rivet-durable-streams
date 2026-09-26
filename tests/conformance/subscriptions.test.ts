@@ -745,7 +745,7 @@ describe("Subscription durability and protocol edges", () => {
     ]) {
       const status = await new Promise<number>((resolve, reject) => {
         const req = httpRequest(new URL(origin!), {
-          method: "PUT", path, headers: { "content-type": "application/json" }, timeout: 15_000,
+          method: "PUT", path, headers: { "content-type": "application/json", authorization: `Bearer ${process.env.RIVET_TOKEN}` }, timeout: 15_000,
         }, (res) => {
           res.resume();
           res.once("end", () => resolve(res.statusCode!));

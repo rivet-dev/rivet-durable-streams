@@ -41,8 +41,11 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or(8787),
     };
     let serve_config = normalize_serve_config(ServeConfig::from_env())?;
-    let client = Client::new(client_config(&serve_config)?);
+    let data_client = client_config(&serve_config)?;
+    let public_connection = (&data_client).into();
+    let client = Client::new(data_client);
     let streams_config = DurableStreamsConfig {
+        data_client: Some(public_connection),
         tenant_scope: std::env::var("DS_TENANT_SCOPE").unwrap_or_else(|_| "default".into()),
         subscriptions: rivet_durable_streams::SubscriptionConfig {
             actor_routing: std::env::var("DS_ACTOR_ROUTING").is_ok_and(|value| value == "1"),

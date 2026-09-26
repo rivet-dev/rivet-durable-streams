@@ -22,8 +22,6 @@ This separation prevents the public DS API from borrowing service privileges to
 bypass caller permissions, while allowing durable delivery after a producer's
 request and credentials are gone.
 
-**Implementation gap:** the HTTP facade currently receives a shared client
-configured with the process token, and webhook injection currently checks only
-the gateway origin/path. Caller-token forwarding and the metadata relationship
-check remain to be implemented; the existing behavior is not an exception to
-these constraints.
+The HTTP facade uses a caller-scoped data connection for lookup, creation, and
+requests. Wake injection is authorized from existing adopted routing records
+and verified cached destinations. Preserve these checks in future changes.

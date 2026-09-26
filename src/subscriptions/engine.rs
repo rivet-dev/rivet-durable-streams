@@ -286,7 +286,7 @@ impl EngineClient {
     }
 
     pub fn actor_wake_url(&self, id: &str) -> String {
-        self.url(&format!("/gateway/{id}/__rivet/stream/wake"))
+        self.url(&format!("/gateway/{id}/internal/streams/wake"))
             .to_string()
     }
 

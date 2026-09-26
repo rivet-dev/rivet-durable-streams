@@ -11,18 +11,44 @@ use axum::routing::any;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::{Bytes, BytesMut};
 use futures_util::StreamExt;
-use rivetkit_client::{Client, GetOptions, GetOrCreateOptions};
+use rivetkit_client::{Client, ClientConfig};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::actor::ACTOR_NAME;
 use crate::protocol::{BRIDGED_REQUEST_HEADERS, INTERNAL_HEADER_PREFIX, MAX_BODY_BYTES};
 
-const ALLOW_HEADERS: &str = "content-type, authorization, If-None-Match, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset";
+const ALLOW_HEADERS: &str = "content-type, authorization, x-rivet-token, If-None-Match, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset";
 const EXPOSE_HEADERS: &str = "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, Stream-TTL, Stream-Expires-At, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq, stream-sse-data-encoding, etag, content-type, content-encoding, location, vary";
+
+/// Non-secret routing fields copied from RivetKit's resolved client configuration.
+#[derive(Clone, Debug)]
+pub struct DataConnection {
+    pub endpoint: String,
+    pub namespace: Option<String>,
+    pub pool_name: Option<String>,
+}
+impl From<&ClientConfig> for DataConnection {
+    fn from(config: &ClientConfig) -> Self {
+        let endpoint = url::Url::parse(&config.endpoint)
+            .ok()
+            .and_then(|mut u| {
+                u.set_username("").ok()?;
+                u.set_password(None).ok()?;
+                Some(u.to_string())
+            })
+            .unwrap_or_default();
+        Self {
+            endpoint,
+            namespace: config.namespace.clone(),
+            pool_name: config.pool_name.clone(),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct DurableStreamsConfig {
+    /// Resolved Rivet connection for public requests. Its credentials are never used.
+    pub data_client: Option<DataConnection>,
     pub subscriptions: crate::subscriptions::facade::SubscriptionConfig,
     /// Separates deterministic actor keys between applications or tenants.
     pub tenant_scope: String,
@@ -39,6 +65,7 @@ impl Default for DurableStreamsConfig {
     fn default() -> Self {
         Self {
             subscriptions: Default::default(),
+            data_client: None,
             tenant_scope: "default".to_owned(),
             public_origin: None,
             body_timeout: Duration::from_secs(15),
@@ -62,8 +89,6 @@ struct FacadeState {
 /// caller's Rivet token so existing Rivet authorization applies. Never replace
 /// missing or rejected caller credentials with the DS process token. The process
 /// token belongs to internal service work and authorized subscriber wakes.
-/// TODO(auth): the current shared client uses process credentials; replace this
-/// data-request path with caller-scoped credentials before exposing it publicly.
 ///
 /// ```ignore
 /// app.nest("/v1/stream", durable_streams_router(client, config))
@@ -170,6 +195,12 @@ async fn handle(
         .await;
     }
 
+    let caller = match crate::caller::Caller::new(&state.config, &headers, &canonical_path, &method)
+    {
+        Ok(caller) => caller,
+        Err(status) => return cors_response(status, Body::from("Stream authorization failed")),
+    };
+
     if state.config.subscriptions.actor_routing {
         let configured = state.actor_routing_initialized.get_or_try_init(|| async {
             let origin = state.config.public_origin.as_deref().ok_or_else(|| anyhow::anyhow!("Actor routing requires public_origin"))?;
@@ -188,110 +219,43 @@ async fn handle(
     }
 
     let actor_key = stream_actor_key(&state.config.tenant_scope, &canonical_path);
-    let actor = if method == Method::PUT {
-        state.client.get_or_create(
-            ACTOR_NAME,
-            vec![actor_key],
-            GetOrCreateOptions {
-                create_with_input: Some(json!({
-                    "path": canonical_path.clone(),
-                    "tenant_scope": state.config.tenant_scope.clone(),
-                })),
-                ..GetOrCreateOptions::default()
-            },
-        )
-    } else {
-        state
-            .client
-            .get(ACTOR_NAME, vec![actor_key], GetOptions::default())
-    };
-    let actor = match actor {
-        Ok(actor) => actor,
-        Err(error) => {
+    let actor = match tokio::time::timeout(
+        state.config.actor_timeout,
+        caller.resolve(&actor_key, method == Method::PUT),
+    )
+    .await
+    {
+        Ok(Ok(Some(id))) => id,
+        Ok(Ok(None)) => {
+            return cors_response(StatusCode::NOT_FOUND, Body::from("Stream not found"));
+        }
+        Ok(Err(status)) => {
             return cors_response(
-                StatusCode::BAD_GATEWAY,
-                Body::from(format!("Actor request failed: {error}")),
+                status,
+                Body::from("Stream actor authorization or lookup failed"),
+            );
+        }
+        Err(_) => {
+            return cors_response(
+                StatusCode::GATEWAY_TIMEOUT,
+                Body::from("Actor resolution timed out"),
             );
         }
     };
-    let actor = if method == Method::PUT {
-        match tokio::time::timeout(state.config.actor_timeout, actor.resolve_handle()).await {
-            Ok(Ok(actor)) => actor,
-            Ok(Err(error)) => {
-                return cors_response(
-                    StatusCode::BAD_GATEWAY,
-                    Body::from(format!("Actor resolution failed: {error}")),
-                );
-            }
-            Err(_) => {
-                return cors_response(
-                    StatusCode::GATEWAY_TIMEOUT,
-                    Body::from("Actor resolution timed out"),
-                );
-            }
-        }
-    } else {
-        match tokio::time::timeout(state.config.actor_timeout, actor.resolve_optional()).await {
-            Ok(Ok(Some(actor))) => actor,
-            Ok(Ok(None)) => {
-                return cors_response(StatusCode::NOT_FOUND, Body::from("Stream not found"));
-            }
-            Ok(Err(error)) => {
-                return cors_response(
-                    StatusCode::BAD_GATEWAY,
-                    Body::from(format!("Actor resolution failed: {error}")),
-                );
-            }
-            Err(_) => {
-                return cors_response(
-                    StatusCode::GATEWAY_TIMEOUT,
-                    Body::from("Actor resolution timed out"),
-                );
-            }
-        }
-    };
-    let mut actor_headers = match bridge_request_headers(&headers) {
+    let actor_headers = match bridge_request_headers(&headers) {
         Ok(headers) => headers,
         Err(message) => {
             return cors_response(StatusCode::BAD_REQUEST, Body::from(message));
         }
     };
-    // Guard verifies this server-owned identity against the actor key and uses
-    // it to authorize reads from a fork's source stream.
-    for (name, value) in [
-        ("x-rivet-stream-path", canonical_path.as_str()),
-        ("x-rivet-stream-tenant", state.config.tenant_scope.as_str()),
-    ] {
-        let Ok(value) = HeaderValue::from_str(value) else {
-            return cors_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Body::from("Invalid stream identity"),
-            );
-        };
-        actor_headers.insert(name, value);
-    }
-    let actor_path = match uri.query() {
-        Some(query) => format!("protocol?{query}"),
-        None => "protocol".to_owned(),
-    };
     let actor_response = match tokio::time::timeout(
         state.config.actor_timeout,
-        actor.fetch(
-            &actor_path,
-            method.clone(),
-            actor_headers,
-            (!body.is_empty()).then_some(body),
-        ),
+        caller.fetch(&actor, uri.query(), method.clone(), actor_headers, body),
     )
     .await
     {
         Ok(Ok(response)) => response,
-        Ok(Err(error)) => {
-            return cors_response(
-                StatusCode::BAD_GATEWAY,
-                Body::from(format!("Actor request failed: {error}")),
-            );
-        }
+        Ok(Err(status)) => return cors_response(status, Body::from("Stream request failed")),
         Err(_) => {
             return cors_response(
                 StatusCode::GATEWAY_TIMEOUT,
