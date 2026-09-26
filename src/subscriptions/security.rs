@@ -79,6 +79,13 @@ pub async fn destination(raw: &str, local: bool) -> Result<(url::Url, Vec<Socket
     Ok((url, addresses))
 }
 
+/// Deliver an asynchronous subscriber wake using service authority, never a
+/// retained producer token. Hard constraint: process-token injection requires
+/// matching the source stream and resolved destination to trusted subscription
+/// metadata in the configured namespace, plus the exact trusted actor wake URL.
+/// Arbitrary webhooks must not receive process credentials.
+/// TODO(auth): gateway_token currently checks only origin/path; the delivery
+/// caller must additionally enforce the metadata relationship before injection.
 pub async fn deliver(
     url: &str,
     local: bool,

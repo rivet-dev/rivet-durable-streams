@@ -57,6 +57,14 @@ struct FacadeState {
 
 /// Returns a router intended to be nested at the application's stream root:
 ///
+/// # Authentication constraint
+/// User data requests, including storage actor lookup/creation, MUST use the
+/// caller's Rivet token so existing Rivet authorization applies. Never replace
+/// missing or rejected caller credentials with the DS process token. The process
+/// token belongs to internal service work and authorized subscriber wakes.
+/// TODO(auth): the current shared client uses process credentials; replace this
+/// data-request path with caller-scoped credentials before exposing it publicly.
+///
 /// ```ignore
 /// app.nest("/v1/stream", durable_streams_router(client, config))
 /// ```
