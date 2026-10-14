@@ -1008,7 +1008,15 @@ impl SubscriptionActor {
             // Persisted subscriptions cannot grant the development exception: it
             // is a deployment setting and must be consistent across actor runners.
             let local = std::env::var("DS_SUBSCRIPTIONS_ALLOW_LOCAL_HTTP").is_ok_and(|s| s == "1");
-            return security::deliver(&webhook.url, local, signature.header(), body).await;
+            return security::deliver(
+                &webhook.url,
+                local,
+                signature.header(),
+                body,
+                ctx.inner().client_endpoint(),
+                ctx.inner().client_token(),
+            )
+            .await;
         }
         let target = format!("{}/{}", sub.root, sub.config.wake_stream.as_ref().unwrap());
         let actor = self.client.get(

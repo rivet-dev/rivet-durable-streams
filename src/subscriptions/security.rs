@@ -84,6 +84,8 @@ pub async fn deliver(
     local: bool,
     signature: String,
     body: bytes::Bytes,
+    engine_endpoint: Option<&str>,
+    engine_token: Option<&str>,
 ) -> Result<bool> {
     // Resolve on every attempt and pin vetted addresses to this connection. Disable
     // proxies and redirects: neither may bypass address validation or leak tokens.
@@ -96,13 +98,16 @@ pub async fn deliver(
         .connect_timeout(Duration::from_secs(5))
         .resolve_to_addrs(&host, &addresses)
         .build()?;
-    let response = client
+    let gateway_token = gateway_token(&url, engine_endpoint, engine_token)?;
+    let mut request = client
         .post(url)
         .header("content-type", "application/json")
         .header("webhook-signature", signature)
-        .body(body)
-        .send()
-        .await?;
+        .body(body);
+    if let Some(token) = gateway_token {
+        request = request.header("x-rivet-token", token);
+    }
+    let response = request.send().await.map_err(reqwest::Error::without_url)?;
     if !response.status().is_success() {
         bail!("Webhook HTTP {}", response.status());
     }
@@ -119,3 +124,34 @@ pub async fn deliver(
         .ok()
         .is_some_and(|v| v.get("done") == Some(&Value::Bool(true))))
 }
+
+fn gateway_token(
+    destination: &url::Url,
+    endpoint: Option<&str>,
+    token: Option<&str>,
+) -> Result<Option<http::HeaderValue>> {
+    let (Some(endpoint), Some(token)) = (endpoint, token) else {
+        return Ok(None);
+    };
+    let endpoint = url::Url::parse(endpoint).context("Invalid configured Engine endpoint")?;
+    let prefix = format!("{}/gateway/", endpoint.path().trim_end_matches('/'));
+    if endpoint.origin() != destination.origin()
+        || !destination
+            .path()
+            .strip_prefix(&prefix)
+            .is_some_and(|route| {
+                let actor = route.split('/').next().unwrap_or_default();
+                !actor.is_empty() && !actor.contains('@') && !actor.contains('%')
+            })
+    {
+        return Ok(None);
+    }
+    let mut header =
+        http::HeaderValue::from_str(token).context("Invalid configured Engine credential")?;
+    header.set_sensitive(true);
+    Ok(Some(header))
+}
+
+#[cfg(test)]
+#[path = "../../tests/unit/subscription_gateway_auth.rs"]
+mod gateway_auth_tests;
