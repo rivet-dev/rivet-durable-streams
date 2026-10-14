@@ -84,8 +84,6 @@ pub async fn destination(raw: &str, local: bool) -> Result<(url::Url, Vec<Socket
 /// matching the source stream and resolved destination to trusted subscription
 /// metadata in the configured namespace, plus the exact trusted actor wake URL.
 /// Arbitrary webhooks must not receive process credentials.
-/// TODO(auth): gateway_token currently checks only origin/path; the delivery
-/// caller must additionally enforce the metadata relationship before injection.
 pub async fn deliver(
     url: &str,
     local: bool,
@@ -93,6 +91,7 @@ pub async fn deliver(
     body: bytes::Bytes,
     engine_endpoint: Option<&str>,
     engine_token: Option<&str>,
+    authorized_actor_id: Option<&str>,
 ) -> Result<bool> {
     // Resolve on every attempt and pin vetted addresses to this connection. Disable
     // proxies and redirects: neither may bypass address validation or leak tokens.
@@ -105,7 +104,7 @@ pub async fn deliver(
         .connect_timeout(Duration::from_secs(5))
         .resolve_to_addrs(&host, &addresses)
         .build()?;
-    let gateway_token = gateway_token(&url, engine_endpoint, engine_token)?;
+    let gateway_token = gateway_token(&url, engine_endpoint, engine_token, authorized_actor_id)?;
     let mut request = client
         .post(url)
         .header("content-type", "application/json")
@@ -116,7 +115,7 @@ pub async fn deliver(
     }
     let response = request.send().await.map_err(reqwest::Error::without_url)?;
     if !response.status().is_success() {
-        bail!("Webhook HTTP {}", response.status());
+        return Err(DeliveryHttpError(response.status().as_u16()).into());
     }
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
@@ -132,24 +131,37 @@ pub async fn deliver(
         .is_some_and(|v| v.get("done") == Some(&Value::Bool(true))))
 }
 
+#[derive(Debug)]
+pub struct DeliveryHttpError(pub u16);
+impl std::fmt::Display for DeliveryHttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Webhook HTTP {}", self.0)
+    }
+}
+impl std::error::Error for DeliveryHttpError {}
+
 fn gateway_token(
     destination: &url::Url,
     endpoint: Option<&str>,
     token: Option<&str>,
+    authorized_actor_id: Option<&str>,
 ) -> Result<Option<http::HeaderValue>> {
-    let (Some(endpoint), Some(token)) = (endpoint, token) else {
+    let (Some(endpoint), Some(token), Some(actor_id)) = (endpoint, token, authorized_actor_id)
+    else {
         return Ok(None);
     };
+    ensure_actor_id(actor_id)?;
     let endpoint = url::Url::parse(endpoint).context("Invalid configured Engine endpoint")?;
-    let prefix = format!("{}/gateway/", endpoint.path().trim_end_matches('/'));
+    let expected = format!(
+        "{}/gateway/{actor_id}/internal/streams/wake",
+        endpoint.path().trim_end_matches('/')
+    );
     if endpoint.origin() != destination.origin()
-        || !destination
-            .path()
-            .strip_prefix(&prefix)
-            .is_some_and(|route| {
-                let actor = route.split('/').next().unwrap_or_default();
-                !actor.is_empty() && !actor.contains('@') && !actor.contains('%')
-            })
+        || destination.path() != expected
+        || !destination.username().is_empty()
+        || destination.password().is_some()
+        || destination.query().is_some()
+        || destination.fragment().is_some()
     {
         return Ok(None);
     }
@@ -157,6 +169,17 @@ fn gateway_token(
         http::HeaderValue::from_str(token).context("Invalid configured Engine credential")?;
     header.set_sensitive(true);
     Ok(Some(header))
+}
+
+fn ensure_actor_id(id: &str) -> Result<()> {
+    anyhow::ensure!(
+        !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+        "Invalid actor destination"
+    );
+    Ok(())
 }
 
 #[cfg(test)]

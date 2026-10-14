@@ -176,6 +176,8 @@ struct Job {
 pub async fn ensure(db: &rivetkit::SqliteDb) -> Result<()> {
     for sql in [
         "CREATE TABLE IF NOT EXISTS actor_route_backfill(rule_key TEXT PRIMARY KEY,cursor TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS actor_route_destinations(rule TEXT NOT NULL,captures TEXT NOT NULL,actor_id TEXT NOT NULL,PRIMARY KEY(rule,captures))",
+        "CREATE INDEX IF NOT EXISTS actor_route_destinations_actor ON actor_route_destinations(actor_id)",
         "CREATE TABLE IF NOT EXISTS actor_route_mounts(root TEXT PRIMARY KEY,public_base TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS actor_routes(key TEXT PRIMARY KEY,value TEXT NOT NULL UNIQUE)",
         "CREATE TABLE IF NOT EXISTS actor_route_jobs(rule_key TEXT NOT NULL,path TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(rule_key,path))",
@@ -250,6 +252,172 @@ pub async fn enqueue(tx: &rivetkit::SqliteTransaction, entry: &CatalogEntry) -> 
 }
 
 impl SubscriptionActor {
+    /// Authorize only integration-owned memberships, against the current catalog
+    /// and a destination previously verified by Engine (namespace, name, pool).
+    pub(super) async fn authorized_actor_wake(
+        &self,
+        ctx: &Ctx<Self>,
+        sub: &Subscription,
+    ) -> Result<Option<String>> {
+        let Some(webhook) = &sub.config.webhook else {
+            return Ok(None);
+        };
+        let _lock = self.lock.lock().await;
+        let rows = ctx.sql().query("SELECT l.path,l.rule FROM actor_route_links l JOIN actor_routes r ON r.value=l.rule WHERE l.sub_key=?", Some(vec![text(db::key(&sub.root,&sub.id))])).await?;
+        if rows.rows.is_empty() {
+            return Ok(None);
+        }
+        ensure!(
+            rows.rows.len() == sub.links.len(),
+            "Actor wake has unowned stream memberships"
+        );
+        let mut destination: Option<String> = None;
+        for row in &rows.rows {
+            let path = db::string(row, 0)?;
+            let rule_value = db::string(row, 1)?;
+            ensure!(
+                sub.links.contains_key(path),
+                "Actor wake membership mismatch"
+            );
+            let rule: Rule = serde_json::from_str(rule_value)?;
+            let captures = rule
+                .resolve(path)?
+                .ok_or_else(|| anyhow!("Actor wake pattern mismatch"))?;
+            let rows = ctx
+                .sql()
+                .query(
+                    "SELECT actor_id FROM actor_route_destinations WHERE rule=? AND captures=?",
+                    Some(vec![
+                        text(rule_value),
+                        text(serde_json::to_string(&captures)?),
+                    ]),
+                )
+                .await?;
+            let id = if let Some(row) = rows.rows.first() {
+                db::string(row, 0)?.to_owned()
+            } else {
+                // Upgrade pre-cache subscriptions by revalidating their declared
+                // destination. Never infer trust from a stored webhook URL.
+                let resolved = match &rule.destination {
+                    Destination::ActorId { actor_name, .. } => {
+                        self.engine
+                            .route_actor(actor_name, &rule.pool, Some(&captures[0]), None)
+                            .await?
+                    }
+                    Destination::ActorKey { actor_name, .. } => {
+                        self.engine
+                            .route_actor(actor_name, &rule.pool, None, Some(&captures))
+                            .await?
+                    }
+                }
+                .ok_or_else(|| anyhow!("Actor destination has not been verified"))?;
+                ensure!(
+                    webhook.url == self.engine.actor_wake_url(&resolved),
+                    "Actor wake URL does not match its declared destination"
+                );
+                ctx.sql().execute("INSERT INTO actor_route_destinations(rule,captures,actor_id) VALUES(?,?,?) ON CONFLICT(rule,captures) DO NOTHING", Some(vec![text(rule_value),text(serde_json::to_string(&captures)?),text(&resolved)])).await?;
+                resolved
+            };
+            ensure!(
+                destination.as_deref().is_none_or(|old| old == id),
+                "Actor wake mixes destinations"
+            );
+            ensure!(
+                webhook.url == self.engine.actor_wake_url(&id),
+                "Actor wake URL does not match its declared destination"
+            );
+            let expected_sub = if rule.name == "primary" {
+                format!("actor-{id}")
+            } else {
+                format!("actor-{id}-{}", rule.name)
+            };
+            ensure!(sub.id == expected_sub, "Actor wake handler mismatch");
+            destination = Some(id);
+        }
+        Ok(destination)
+    }
+
+    /// A webhook 404 alone can be an application routing error. Confirm absence
+    /// with Engine before invalidating the durable destination cache.
+    pub(super) async fn reconcile_missing_destination(
+        &self,
+        ctx: &Ctx<Self>,
+        sub: &Subscription,
+        id: &str,
+    ) -> Result<()> {
+        let rows = ctx
+            .sql()
+            .query(
+                "SELECT rule FROM actor_route_links WHERE sub_key=? LIMIT 1",
+                Some(vec![text(db::key(&sub.root, &sub.id))]),
+            )
+            .await?;
+        let Some(row) = rows.rows.first() else {
+            return Ok(());
+        };
+        let rule: Rule = serde_json::from_str(db::string(row, 0)?)?;
+        if self
+            .engine
+            .route_actor(rule.actor_name(), &rule.pool, Some(id), None)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let _lock = self.lock.lock().await;
+        let tx = db::begin(ctx.sql()).await?;
+        let sub_key = db::key(&sub.root, &sub.id);
+        let Some(mut current) = db::load(&tx, &sub_key).await? else {
+            tx.rollback().await?;
+            return Ok(());
+        };
+        // Do not invalidate a replacement configured during Engine I/O.
+        if current.config.webhook != sub.config.webhook {
+            tx.rollback().await?;
+            return Ok(());
+        }
+        let rows = tx.execute("SELECT l.path,l.rule FROM actor_route_links l JOIN actor_routes r ON r.value=l.rule WHERE l.sub_key=?",Some(vec![text(&sub_key)])).await?;
+        for row in &rows.rows {
+            let relative = db::string(row, 0)?;
+            let rule: Rule = serde_json::from_str(db::string(row, 1)?)?;
+            if matches!(rule.destination, Destination::ActorKey { .. }) {
+                let path = format!("{}/{}", sub.root, relative);
+                if let Some(entry) = db::catalog(&tx, &path).await? {
+                    if let Some(link) = current.links.get(relative) {
+                        let job = Job {
+                            rule: rule.clone(),
+                            root: sub.root.clone(),
+                            public_base: sub.public_base.clone(),
+                            before: link.acked.clone(),
+                            entry,
+                        };
+                        tx.execute("INSERT INTO actor_route_jobs(rule_key,path,value) VALUES(?,?,?) ON CONFLICT(rule_key,path) DO UPDATE SET value=excluded.value",Some(vec![text(rule.key()?),text(path),text(serde_json::to_string(&job)?)])).await?;
+                    }
+                }
+            }
+        }
+        tx.execute(
+            "DELETE FROM actor_route_destinations WHERE actor_id=?",
+            Some(vec![text(id)]),
+        )
+        .await?;
+        tx.execute(
+            "DELETE FROM actor_route_links WHERE sub_key=?",
+            Some(vec![text(&sub_key)]),
+        )
+        .await?;
+        current.deleted = true;
+        current.wake = None;
+        current.generation += 1;
+        current.links.clear();
+        current.config.streams.clear();
+        current.config_hash = current.config.hash();
+        db::sync_links(&tx, &current).await?;
+        db::save(&tx, &current).await?;
+        tx.commit().await?;
+        self.arm(ctx, now_ms() + 10).await?;
+        Ok(())
+    }
     pub(super) async fn refresh_actor_routes(&self, ctx: &Ctx<Self>) -> Result<()> {
         let mut refreshed = self.routes_refreshed.lock().await;
         if *refreshed + REFRESH_MS > now_ms() {
@@ -350,6 +518,7 @@ impl SubscriptionActor {
             )
             .await?;
         }
+        tx.execute("DELETE FROM actor_route_destinations WHERE rule NOT IN (SELECT value FROM actor_routes)", None).await?;
         tx.commit().await?;
         *refreshed = now_ms();
         drop(_lock);
@@ -503,8 +672,23 @@ impl SubscriptionActor {
                 .rule
                 .resolve(relative)?
                 .ok_or_else(|| anyhow!("Invalid route job pattern"))?;
+            let captures = serde_json::to_string(&resolved)?;
+            let cached = ctx
+                .sql()
+                .query(
+                    "SELECT actor_id FROM actor_route_destinations WHERE rule=? AND captures=?",
+                    Some(vec![text(&rule_value), text(&captures)]),
+                )
+                .await?;
+            let cached = cached
+                .rows
+                .first()
+                .map(|r| db::string(r, 0).map(str::to_owned))
+                .transpose()?;
             let actor_id = if active.rows.is_empty() {
                 None
+            } else if let Some(id) = cached {
+                Some(id)
             } else {
                 match &job.rule.destination {
                     Destination::ActorId { actor_name, .. } => {
@@ -529,6 +713,7 @@ impl SubscriptionActor {
                 )
                 .await?;
             if let Some(actor_id) = actor_id.filter(|_| !active.rows.is_empty()) {
+                tx.execute("INSERT INTO actor_route_destinations(rule,captures,actor_id) VALUES(?,?,?) ON CONFLICT(rule,captures) DO UPDATE SET actor_id=excluded.actor_id", Some(vec![text(&rule_value),text(&captures),text(&actor_id)])).await?;
                 let id = if job.rule.name == "primary" {
                     format!("actor-{actor_id}")
                 } else {
@@ -585,6 +770,36 @@ impl SubscriptionActor {
                 db::sync_links(&tx, &sub).await?;
                 db::save(&tx, &sub).await?;
                 tx.execute("INSERT INTO actor_route_links(sub_key,path,rule) VALUES(?,?,?) ON CONFLICT(sub_key,path) DO UPDATE SET rule=excluded.rule",Some(vec![text(&sub_key),text(relative),text(&rule_value)])).await?;
+            } else if !active.rows.is_empty()
+                && matches!(job.rule.destination, Destination::ActorId { .. })
+            {
+                // Another subscription may already have evicted this actor's
+                // cache. A confirmed missing ID still retires its primary
+                // membership, even when there is no cached wake to deliver.
+                let sub_key = db::key(&job.root, &format!("actor-{}", resolved[0]));
+                let owned = tx
+                    .execute(
+                        "SELECT path FROM actor_route_links WHERE sub_key=? AND rule=? LIMIT 1",
+                        Some(vec![text(&sub_key), text(&rule_value)]),
+                    )
+                    .await?;
+                if !owned.rows.is_empty() {
+                    if let Some(mut sub) = db::load(&tx, &sub_key).await? {
+                        sub.deleted = true;
+                        sub.wake = None;
+                        sub.generation += 1;
+                        sub.links.clear();
+                        sub.config.streams.clear();
+                        sub.config_hash = sub.config.hash();
+                        tx.execute(
+                            "DELETE FROM actor_route_links WHERE sub_key=?",
+                            Some(vec![text(&sub_key)]),
+                        )
+                        .await?;
+                        db::sync_links(&tx, &sub).await?;
+                        db::save(&tx, &sub).await?;
+                    }
+                }
             }
             // A later coalesced append is already represented by the latest catalog
             // read above, but retain it if the rule changed while resolution ran.

@@ -2,6 +2,7 @@
 //! RivetKit actors.
 
 mod actor;
+mod caller;
 mod client;
 mod facade;
 mod protocol;
@@ -11,7 +12,7 @@ pub use subscriptions::catalog_import::CatalogApi;
 pub use subscriptions::facade::SubscriptionConfig;
 
 pub use actor::{ACTOR_NAME, DurableStreamActor, DurableStreamInput, DurableStreamState};
-pub use facade::{DurableStreamsConfig, durable_streams_router};
+pub use facade::{DataConnection, DurableStreamsConfig, durable_streams_router};
 pub use protocol::{MAX_BODY_BYTES, ZERO_OFFSET};
 
 use std::path::PathBuf;
