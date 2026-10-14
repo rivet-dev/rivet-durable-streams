@@ -1,24 +1,76 @@
+use std::time::Duration;
+
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use rivet_durable_streams::{ACTOR_NAME, register};
-use rivetkit::Registry;
-use rivetkit_client::GetOrCreateOptions;
+use rivetkit::{Registry, ServeConfig};
+use rivetkit_client::{Client, ClientConfig, GetOrCreateOptions};
 use serde_json::json;
+use sha2::{Digest, Sha256};
+use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 #[ignore = "requires a matching local Rivet Engine"]
 async fn create_append_read_sse_and_delete() -> anyhow::Result<()> {
     let mut registry = Registry::new();
     register(&mut registry);
-    let runtime = rivetkit::test::setup(registry).await?;
-    let actor = runtime.client().get_or_create(
+    let shutdown = CancellationToken::new();
+    let _shutdown_guard = shutdown.clone().drop_guard();
+    let mut serve = None;
+    let mut runtime = None;
+    let client = if let Ok(endpoint) = std::env::var("RIVET_TEST_ENDPOINT") {
+        let pool = format!("durable-streams-e2e-{}", uuid::Uuid::new_v4());
+        let token = std::env::var("RIVET_TOKEN").unwrap_or_else(|_| "dev".into());
+        let namespace = std::env::var("RIVET_NAMESPACE").unwrap_or_else(|_| "default".into());
+        let config = ServeConfig {
+            endpoint: endpoint.clone(),
+            token: Some(token.clone()),
+            namespace: namespace.clone(),
+            pool_name: pool.clone(),
+            ..ServeConfig::default()
+        };
+        serve = Some(tokio::spawn(
+            registry.serve_with_config(config, shutdown.clone()),
+        ));
+        Client::new(
+            ClientConfig::new(endpoint)
+                .token(&token)
+                .header("authorization", format!("Bearer {token}"))
+                .namespace(namespace)
+                .pool_name(pool),
+        )
+    } else {
+        runtime = Some(rivetkit::test::setup(registry).await?);
+        runtime.as_ref().unwrap().client().clone()
+    };
+    let path = format!("/integration/{}", uuid::Uuid::new_v4());
+    let mut hash = Sha256::new();
+    hash.update(b"test\0");
+    hash.update(path.as_bytes());
+    let actor = client.get_or_create(
         ACTOR_NAME,
-        vec![format!("durable-stream-{}", uuid::Uuid::new_v4())],
+        vec![format!("{:x}", hash.finalize())],
         GetOrCreateOptions {
-            create_with_input: Some(json!({ "path": "/integration", "tenant_scope": "test" })),
+            create_with_input: Some(json!({ "path": path, "tenant_scope": "test" })),
             ..GetOrCreateOptions::default()
         },
     )?;
+
+    // The public registry API has no readiness observer. A successful HEAD
+    // proves the new pool and actor are ready without retrying mutations.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(response) = actor
+                .fetch("protocol", Method::HEAD, HeaderMap::new(), None)
+                .await
+                && response.status() == StatusCode::NOT_FOUND
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await?;
 
     let response = actor
         .fetch(
@@ -66,8 +118,15 @@ async fn create_append_read_sse_and_delete() -> anyhow::Result<()> {
     let body = response.text().await?;
     assert!(body.contains("event: data\n"));
     assert!(body.contains(r#"data:[{"n":1},{"n":2}]"#));
-    assert!(body.contains("event: control\n"));
-    assert!(body.contains(r#"\"streamClosed\":true"#));
+    let control = body
+        .split("\n\n")
+        .find(|frame| frame.starts_with("event: control\n"))
+        .and_then(|frame| frame.lines().find_map(|line| line.strip_prefix("data:")))
+        .expect("SSE control frame");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(control)?["streamClosed"],
+        true
+    );
 
     let response = actor
         .fetch("protocol", Method::DELETE, HeaderMap::new(), None)
@@ -78,7 +137,13 @@ async fn create_append_read_sse_and_delete() -> anyhow::Result<()> {
         .await?;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    runtime.shutdown().await;
+    shutdown.cancel();
+    if let Some(serve) = serve {
+        tokio::time::timeout(Duration::from_secs(30), serve).await???;
+    }
+    if let Some(runtime) = runtime {
+        runtime.shutdown().await;
+    }
     Ok(())
 }
 

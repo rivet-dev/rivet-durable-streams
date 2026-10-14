@@ -43,6 +43,21 @@ async fn main() -> anyhow::Result<()> {
     let serve_config = normalize_serve_config(ServeConfig::from_env())?;
     let client = Client::new(client_config(&serve_config)?);
     let streams_config = DurableStreamsConfig {
+        tenant_scope: std::env::var("DS_TENANT_SCOPE").unwrap_or_else(|_| "default".into()),
+        subscriptions: rivet_durable_streams::SubscriptionConfig {
+            management_token: std::env::var("DS_SUBSCRIPTIONS_MANAGEMENT_TOKEN")
+                .ok()
+                .filter(|v| !v.is_empty()),
+            allow_unauthenticated: std::env::var("DS_SUBSCRIPTIONS_ALLOW_UNAUTHENTICATED")
+                .is_ok_and(|v| v == "1"),
+            allow_local_http: std::env::var("DS_SUBSCRIPTIONS_ALLOW_LOCAL_HTTP")
+                .is_ok_and(|v| v == "1"),
+            catalog_api: Some(rivet_durable_streams::CatalogApi {
+                endpoint: serve_config.endpoint.clone(),
+                namespace: serve_config.namespace.clone(),
+                token: serve_config.token.clone(),
+            }),
+        },
         public_origin: std::env::var("PUBLIC_ORIGIN").ok(),
         ..DurableStreamsConfig::default()
     };

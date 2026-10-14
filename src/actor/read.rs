@@ -153,14 +153,16 @@ impl DurableStreamActor {
         } else {
             offset
         };
-        let mut snapshot = self
+        let Some(mut snapshot) = self
             .read_snapshot(
                 &ctx,
                 effective_offset,
                 Some(initial_meta.generation.as_str()),
             )
             .await?
-            .ok_or_else(|| anyhow!("stream generation changed during read"))?;
+        else {
+            return text_response(404, "Stream not found", [] as [(&str, &str); 0]).map(Into::into);
+        };
         let caught_up = effective_offset == Some(initial_meta.current_offset.as_str());
         if live.as_deref() == Some("long-poll")
             && caught_up
@@ -445,29 +447,44 @@ impl DurableStreamActor {
         let _reader = Arc::clone(&self.readers)
             .try_acquire_owned()
             .map_err(|_| anyhow!("too many concurrent reads"))?;
-        let Some(meta) = self.visible_meta(ctx, now_ms()).await? else {
+        let Some(mut meta) = self.visible_meta(ctx, now_ms()).await? else {
             return Ok(None);
         };
         if expected_generation.is_some_and(|generation| generation != meta.generation) {
             return Ok(None);
         }
-        let batch = self
-            .read_stitched(
-                ctx,
-                &meta,
-                offset,
-                None,
-                crate::protocol::MAX_READ_ROWS,
-                crate::protocol::MAX_READ_BYTES,
-            )
-            .await?;
-        let Some(fresh) = get_meta(ctx.sql()).await? else {
-            return Ok(None);
-        };
-        if fresh.generation != meta.generation {
-            return Ok(None);
-        }
+        // Reserve sliding TTL before an inherited fork read can await its source.
         self.touch_access(ctx, now_ms()).await?;
-        Ok(Some(ReadSnapshot { meta: fresh, batch }))
+        let mut retries = 0;
+        loop {
+            let mut batch = self
+                .read_stitched(
+                    ctx,
+                    &meta,
+                    offset,
+                    None,
+                    crate::protocol::MAX_READ_ROWS,
+                    crate::protocol::MAX_READ_BYTES,
+                )
+                .await?;
+            let Some(fresh) = get_meta(ctx.sql()).await? else {
+                return Ok(None);
+            };
+            if fresh.generation != meta.generation {
+                return Ok(None);
+            }
+            if batch.messages.is_empty() && fresh.current_offset != meta.current_offset {
+                // An append landed between the message read and the metadata read.
+                // Do not advance the cursor past data that this batch never saw.
+                if retries < 2 {
+                    retries += 1;
+                    meta = fresh;
+                    continue;
+                }
+                batch.capped = true;
+                return Ok(Some(ReadSnapshot { meta, batch }));
+            }
+            return Ok(Some(ReadSnapshot { meta: fresh, batch }));
+        }
     }
 }

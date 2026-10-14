@@ -2,9 +2,13 @@
 //! RivetKit actors.
 
 mod actor;
+mod client;
 mod facade;
 mod protocol;
 mod store;
+mod subscriptions;
+pub use subscriptions::catalog_import::CatalogApi;
+pub use subscriptions::facade::SubscriptionConfig;
 
 pub use actor::{ACTOR_NAME, DurableStreamActor, DurableStreamInput, DurableStreamState};
 pub use facade::{DurableStreamsConfig, durable_streams_router};
@@ -38,6 +42,17 @@ pub fn register_with_inspector(registry: &mut Registry, inspector_root: Option<P
             None
         }
     });
+    registry.register_actor_with::<subscriptions::SubscriptionActor>(
+        subscriptions::ACTOR_NAME,
+        ActorConfig {
+            has_database: true,
+            has_state: true,
+            max_incoming_message_size: 6 * 1024 * 1024,
+            // A 4096-stream snapshot with percent-encoded maximum paths is ~25 MiB.
+            max_outgoing_message_size: 32 * 1024 * 1024,
+            ..ActorConfig::default()
+        },
+    );
     let inspector_tabs = inspector_root.map(inspector_tabs).unwrap_or_default();
     registry.register_actor_with::<DurableStreamActor>(
         ACTOR_NAME,

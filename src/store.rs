@@ -84,12 +84,49 @@ CREATE TABLE IF NOT EXISTS gc_releases (
 "#,
 ];
 
+const MIGRATION_2: &[&str] = &[
+    r#"
+CREATE TABLE subscription_outbox (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  version INTEGER NOT NULL,
+  dirty INTEGER NOT NULL,
+  incarnation TEXT NOT NULL,
+  tail TEXT NOT NULL,
+  start_offset TEXT NOT NULL,
+  stream_exists INTEGER NOT NULL
+) STRICT
+"#,
+    // Existing streams enter the catalog at their deployment-time tail. The
+    // row survives deletion, so delayed notifications cannot revive an old
+    // incarnation after the same stream path has been recreated.
+    r#"
+INSERT INTO subscription_outbox
+  (singleton, version, dirty, incarnation, tail, start_offset, stream_exists)
+SELECT 1, 1, 1, gen, current_offset, current_offset, 1 - soft_deleted FROM meta
+"#,
+    r#"
+CREATE TABLE subscription_wake_writes (
+  version INTEGER PRIMARY KEY,
+  before_offset TEXT NOT NULL,
+  after_offset TEXT NOT NULL,
+  incarnation TEXT NOT NULL,
+  origin_sub_key TEXT NOT NULL
+) STRICT
+"#,
+];
+
 // Entries are immutable once released. Schema changes append a migration with
 // the next version instead of modifying or reordering existing entries.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    statements: MIGRATION_1,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        statements: MIGRATION_1,
+    },
+    Migration {
+        version: 2,
+        statements: MIGRATION_2,
+    },
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Meta {
@@ -165,6 +202,92 @@ pub struct GcRelease {
     pub edge_id: String,
     pub parent_path: String,
     pub source_generation: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SubscriptionOutbox {
+    pub version: i64,
+    pub dirty: bool,
+    pub incarnation: String,
+    pub tail: String,
+    pub start: String,
+    pub exists: bool,
+    pub wakes: Vec<crate::subscriptions::model::WakeInterval>,
+}
+
+pub async fn subscription_outbox(db: &SqliteDb) -> Result<Option<SubscriptionOutbox>> {
+    let result = db
+        .query(
+            "SELECT o.version, o.dirty, o.incarnation, o.tail, o.start_offset, o.stream_exists, \
+             w.before_offset, w.after_offset, w.incarnation, w.origin_sub_key FROM subscription_outbox AS o \
+             LEFT JOIN subscription_wake_writes AS w ON w.incarnation = o.incarnation \
+             WHERE o.singleton = 1 ORDER BY w.version",
+            None,
+        )
+        .await?;
+    let Some(row) = result.rows.first() else {
+        return Ok(None);
+    };
+    let wakes = result
+        .rows
+        .iter()
+        .filter(|row| !matches!(row.get(6), Some(ColumnValue::Null)))
+        .map(|row| {
+            Ok(crate::subscriptions::model::WakeInterval {
+                before: text(row.get(6))?,
+                after: text(row.get(7))?,
+                incarnation: text(row.get(8))?,
+                origin: text(row.get(9))?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(SubscriptionOutbox {
+        version: int(row.first())?,
+        dirty: int(row.get(1))? != 0,
+        incarnation: text(row.get(2))?,
+        tail: text(row.get(3))?,
+        start: text(row.get(4))?,
+        exists: int(row.get(5))? != 0,
+        wakes,
+    }))
+}
+
+pub async fn acknowledge_subscription_outbox(db: &SqliteDb, version: i64) -> Result<()> {
+    let tx = begin_mutation(db).await?;
+    tx.execute(
+        "UPDATE subscription_outbox SET dirty = 0 WHERE singleton = 1 AND version = ?",
+        Some(vec![BindParam::Integer(version)]),
+    )
+    .await?;
+    tx.execute(
+        "DELETE FROM subscription_wake_writes WHERE version <= ?",
+        Some(vec![BindParam::Integer(version)]),
+    )
+    .await?;
+    tx.commit().await
+}
+
+pub async fn record_subscription_wake(
+    tx: &SqliteTransaction,
+    before: &str,
+    origin: &str,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO subscription_wake_writes (version, before_offset, after_offset, incarnation,origin_sub_key) \
+         SELECT version, ?, tail, incarnation,? FROM subscription_outbox WHERE singleton = 1",
+        Some(vec![BindParam::Text(before.to_owned()),BindParam::Text(origin.to_owned())]),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn set_subscription_start(tx: &SqliteTransaction, offset: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE subscription_outbox SET start_offset = ? WHERE singleton = 1",
+        Some(vec![BindParam::Text(offset.to_owned())]),
+    )
+    .await?;
+    Ok(())
 }
 
 pub async fn ensure_schema(db: &SqliteDb) -> Result<()> {
@@ -318,6 +441,16 @@ pub async fn create_meta(
         ]),
     )
     .await?;
+    tx.execute(
+        "INSERT INTO subscription_outbox \
+         (singleton, version, dirty, incarnation, tail, start_offset, stream_exists) \
+         SELECT 1, 1, 1, gen, current_offset, current_offset, 1 FROM meta WHERE id = 1 \
+         ON CONFLICT(singleton) DO UPDATE SET version = subscription_outbox.version + 1, \
+         dirty = 1, incarnation = excluded.incarnation, tail = excluded.tail, \
+         start_offset = excluded.start_offset, stream_exists = 1",
+        None,
+    )
+    .await?;
     Ok(())
 }
 
@@ -348,6 +481,12 @@ pub async fn append_message(
     }
     tx.execute(
         "UPDATE meta SET current_offset = ? WHERE id = 1",
+        Some(vec![BindParam::Text(next.clone())]),
+    )
+    .await?;
+    tx.execute(
+        "UPDATE subscription_outbox SET version = version + 1, dirty = 1, tail = ? \
+         WHERE singleton = 1",
         Some(vec![BindParam::Text(next.clone())]),
     )
     .await?;
@@ -382,6 +521,7 @@ pub async fn set_closed(tx: &SqliteTransaction, closed_by: Option<String>) -> Re
 }
 
 pub async fn purge(tx: &SqliteTransaction) -> Result<()> {
+    mark_subscription_deleted(tx).await?;
     for statement in [
         "DELETE FROM meta",
         "DELETE FROM messages",
@@ -394,8 +534,19 @@ pub async fn purge(tx: &SqliteTransaction) -> Result<()> {
 }
 
 pub async fn set_soft_deleted(tx: &SqliteTransaction) -> Result<()> {
+    mark_subscription_deleted(tx).await?;
     tx.execute("UPDATE meta SET soft_deleted = 1 WHERE id = 1", None)
         .await?;
+    Ok(())
+}
+
+async fn mark_subscription_deleted(tx: &SqliteTransaction) -> Result<()> {
+    tx.execute(
+        "UPDATE subscription_outbox SET version = version + 1, dirty = 1, stream_exists = 0 \
+         WHERE singleton = 1 AND stream_exists = 1",
+        None,
+    )
+    .await?;
     Ok(())
 }
 

@@ -39,6 +39,7 @@ use producer::{
     close_success, closed_by_matches, parse_producer, producer_failure, producer_success,
     validate_producer,
 };
+use subscriptions::wake_request;
 
 mod producer;
 
@@ -61,7 +62,10 @@ pub struct DurableStreamState {
 }
 
 pub struct DurableStreamActor {
+    client: rivetkit_client::Client,
     lifecycle: Mutex<()>,
+    subscription_flush: Mutex<Option<Instant>>,
+    subscription_recovery_armed: Mutex<bool>,
     changes: watch::Sender<u64>,
     live_readers: Arc<Semaphore>,
     readers: Arc<Semaphore>,
@@ -103,7 +107,6 @@ struct ForkCreateOptions<'a> {
     expires_at: Option<&'a str>,
     closed: bool,
     body: &'a [u8],
-    now_ms: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -187,11 +190,44 @@ impl Action for Maintenance {
     const NAME: &'static str = "__durableStreamMaintenance";
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubscriptionSnapshot;
+
+impl Action for SubscriptionSnapshot {
+    type Output = SubscriptionSnapshotResult;
+    const NAME: &'static str = "__durableStreamSubscriptionSnapshot";
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppendWake {
+    pub wake_id: String,
+    pub event: serde_json::Value,
+    pub origin_sub_key: String,
+}
+
+impl Action for AppendWake {
+    type Output = u16;
+    const NAME: &'static str = "__durableStreamAppendWake";
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubscriptionSnapshotResult {
+    pub tenant_scope: String,
+    pub entry: Option<crate::subscriptions::model::CatalogEntry>,
+}
+
 #[async_trait]
 impl Actor for DurableStreamActor {
     type State = DurableStreamState;
     type Input = DurableStreamInput;
-    type Actions = (ForkAcquire, ForkRelease, ReadRange, Maintenance);
+    type Actions = (
+        ForkAcquire,
+        ForkRelease,
+        ReadRange,
+        Maintenance,
+        SubscriptionSnapshot,
+        AppendWake,
+    );
     type Events = ();
     type Queue = ();
     type ConnParams = ();
@@ -226,7 +262,10 @@ impl Actor for DurableStreamActor {
         store::ensure_schema(ctx.sql()).await?;
         let (changes, _) = watch::channel(0);
         Ok(Self {
+            client: crate::client::actor_client(ctx)?,
             lifecycle: Mutex::new(()),
+            subscription_flush: Mutex::new(None),
+            subscription_recovery_armed: Mutex::new(false),
             changes,
             live_readers: Arc::new(Semaphore::new(64)),
             readers: Arc::new(Semaphore::new(32)),
@@ -238,10 +277,18 @@ impl Actor for DurableStreamActor {
         ctx: Ctx<Self>,
         request: Request,
     ) -> Result<ActorHttpResponse> {
-        match *request.method() {
+        let mutates = matches!(
+            *request.method(),
+            http::Method::PUT | http::Method::POST | http::Method::DELETE
+        );
+        if mutates {
+            // Persist recovery before any data/outbox transaction can commit.
+            self.arm_subscription_recovery(&ctx).await?;
+        }
+        let result = match *request.method() {
             http::Method::PUT => self.handle_put(&ctx, &request).await.map(Into::into),
             http::Method::POST => self.handle_post(&ctx, &request).await.map(Into::into),
-            http::Method::GET => self.handle_get(ctx, request).await,
+            http::Method::GET => self.clone().handle_get(ctx.clone(), request).await,
             http::Method::HEAD => self.handle_head(&ctx).await.map(Into::into),
             http::Method::DELETE => self.handle_delete(&ctx).await.map(Into::into),
             _ => response(
@@ -250,10 +297,24 @@ impl Actor for DurableStreamActor {
                 Vec::new(),
             )
             .map(Into::into),
+        };
+        if mutates {
+            if result.as_ref().is_ok_and(|response| match response {
+                ActorHttpResponse::Buffered(response) => response.status().is_success(),
+                _ => false,
+            }) {
+                crate::subscriptions::fault::checkpoint("after_stream_commit");
+            }
+            // Handlers have released lifecycle before catalog RPCs, allowing
+            // registration to read snapshots while an append is completing.
+            self.flush_subscriptions_best_effort(&ctx).await;
         }
+        result
     }
 
     async fn on_start(self: Arc<Self>, ctx: Ctx<Self>) -> Result<()> {
+        // Become callable before notifying the catalog: a coordinator may be
+        // starting this actor in order to request a backfill snapshot.
         self.run_maintenance(&ctx).await
     }
 }
@@ -301,7 +362,40 @@ impl Handles<Maintenance> for DurableStreamActor {
     type Future = BoxActionFuture<()>;
 
     fn handle(self: Arc<Self>, ctx: Ctx<Self>, _action: Maintenance) -> Self::Future {
-        Box::pin(async move { self.run_maintenance(&ctx).await })
+        Box::pin(async move {
+            let result = self.run_maintenance(&ctx).await;
+            if result.is_err() {
+                self.arm_subscription_recovery(&ctx).await?;
+            }
+            self.defer_subscription_flush(&ctx);
+            result
+        })
+    }
+}
+
+impl Handles<SubscriptionSnapshot> for DurableStreamActor {
+    type Future = BoxActionFuture<SubscriptionSnapshotResult>;
+
+    fn handle(self: Arc<Self>, ctx: Ctx<Self>, _action: SubscriptionSnapshot) -> Self::Future {
+        Box::pin(async move { self.subscription_snapshot(&ctx).await })
+    }
+}
+
+impl Handles<AppendWake> for DurableStreamActor {
+    type Future = BoxActionFuture<u16>;
+
+    fn handle(self: Arc<Self>, ctx: Ctx<Self>, action: AppendWake) -> Self::Future {
+        Box::pin(async move {
+            self.arm_subscription_recovery(&ctx).await?;
+            let origin = action.origin_sub_key.clone();
+            let request = wake_request(action)?;
+            let result = self.handle_post_inner(&ctx, &request, Some(&origin)).await;
+            if result.as_ref().is_ok_and(|r| r.status().is_success()) {
+                crate::subscriptions::fault::checkpoint("after_wake_append_commit");
+            }
+            self.defer_subscription_flush(&ctx);
+            result.map(|response| response.status().as_u16())
+        })
     }
 }
 
@@ -309,6 +403,7 @@ mod fork;
 mod lifecycle;
 mod maintenance;
 mod read;
+mod subscriptions;
 mod write;
 
 fn query_values(request: &Request, name: &str) -> Vec<String> {
