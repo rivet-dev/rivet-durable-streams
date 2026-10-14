@@ -14,6 +14,8 @@ use super::{Control, Reply, catalog_import::CatalogApi, model::ApiError};
 /// their existing authenticated boundary instead of a separate bearer secret.
 #[derive(Clone, Default)]
 pub struct SubscriptionConfig {
+    /// Reconcile actor declarations from this service runtime's Engine namespace.
+    pub actor_routing: bool,
     pub management_token: Option<String>,
     pub allow_unauthenticated: bool,
     pub allow_local_http: bool,

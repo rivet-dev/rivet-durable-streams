@@ -253,6 +253,7 @@ mod storage {
                     lock: tokio::sync::Mutex::new(()),
                     pumping: std::sync::atomic::AtomicBool::new(false),
                     alarm: tokio::sync::Mutex::new(None),
+                    routes_refreshed: tokio::sync::Mutex::new(0),
                 };
                 let mut fanout_times = Vec::new();
                 for pass in 0..4 {

@@ -209,6 +209,87 @@ impl EngineClient {
 
     /// Resolve the existing configured namespace once; callers persist this ID to
     /// prevent namespace-name reuse from silently changing subscription authority.
+    pub async fn actor_names_page(&self, cursor: Option<&str>) -> Result<Value> {
+        let mut request = self.inner.http.get(self.url("/actors/names")).query(&[
+            ("namespace", self.inner.namespace.as_str()),
+            ("limit", "32"),
+        ]);
+        if let Some(cursor) = cursor {
+            request = request.query(&[("cursor", cursor)]);
+        }
+        self.json(self.authenticate(request)?).await
+    }
+
+    pub async fn route_actor(
+        &self,
+        name: &str,
+        pool: &str,
+        id: Option<&str>,
+        key: Option<&[String]>,
+    ) -> Result<Option<String>> {
+        let value: Value = if let Some(id) = id {
+            if !identifier(id) {
+                return Ok(None);
+            }
+            match self
+                .json(
+                    self.authenticate(self.inner.http.get(self.url("/actors")).query(&[
+                        ("namespace", self.inner.namespace.as_str()),
+                        ("actor_id", id),
+                    ]))?,
+                )
+                .await
+            {
+                Ok(value) => value,
+                // Stream paths are untrusted. An invalid or absent ID must not
+                // block routing for unrelated streams behind this job.
+                Err(error) if matches!(error.status, 400 | 404) => return Ok(None),
+                Err(error) => return Err(error),
+            }
+        } else {
+            let key = key.ok_or_else(EngineError::response)?;
+            // Engine actor keys use escaped slash-separated components.
+            let encoded = if key.is_empty() {
+                "/".to_owned()
+            } else {
+                key.iter()
+                    .map(|v| {
+                        if v.is_empty() {
+                            "\\0".to_owned()
+                        } else {
+                            v.replace('\\', "\\\\").replace('/', "\\/")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/")
+            };
+            if encoded.len() > 1024 {
+                return Ok(None);
+            }
+            self.json(self.authenticate(self.inner.http.put(self.url("/actors"))
+                .query(&[("namespace", self.inner.namespace.as_str())])
+                .json(&json!({"name":name,"key":encoded,"runner_name_selector":pool,"crash_policy":"sleep"})))?).await?
+        };
+        let actor = if id.is_some() {
+            value["actors"].as_array().and_then(|a| a.first())
+        } else {
+            value.get("actor")
+        };
+        let Some(actor) = actor else { return Ok(None) };
+        if !matches_actor_destination(actor, name, pool, &self.namespace_id().await?, id) {
+            return Ok(None);
+        }
+        Ok(actor["actor_id"]
+            .as_str()
+            .filter(|id| identifier(id))
+            .map(str::to_owned))
+    }
+
+    pub fn actor_wake_url(&self, id: &str) -> String {
+        self.url(&format!("/gateway/{id}/__rivet/stream/wake"))
+            .to_string()
+    }
+
     pub async fn namespace_id(&self) -> Result<String> {
         self.inner
             .namespace_id
@@ -580,6 +661,24 @@ fn identifier(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
 }
+
+fn matches_actor_destination(
+    actor: &Value,
+    name: &str,
+    pool: &str,
+    namespace: &str,
+    id: Option<&str>,
+) -> bool {
+    actor["name"] == name
+        && actor["namespace_id"] == namespace
+        && actor["destroy_ts"].is_null()
+        && actor["runner_name_selector"] == pool
+        && id.is_none_or(|id| actor["actor_id"] == id)
+}
+
+#[cfg(test)]
+#[path = "../../tests/unit/actor_destination.rs"]
+mod actor_destination_tests;
 fn namespace_path(namespace: &str) -> Result<String> {
     if !identifier(namespace) {
         return Err(EngineError::new(503, "ENGINE_NAMESPACE_INVALID"));

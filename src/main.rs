@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let streams_config = DurableStreamsConfig {
         tenant_scope: std::env::var("DS_TENANT_SCOPE").unwrap_or_else(|_| "default".into()),
         subscriptions: rivet_durable_streams::SubscriptionConfig {
+            actor_routing: std::env::var("DS_ACTOR_ROUTING").is_ok_and(|value| value == "1"),
             management_token: std::env::var("DS_SUBSCRIPTIONS_MANAGEMENT_TOKEN")
                 .ok()
                 .filter(|v| !v.is_empty()),

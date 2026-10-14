@@ -52,4 +52,5 @@ tokio-util = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5"
+urlpattern = "0.6"
 uuid = { version = "1.11", features = ["v4"] }
